@@ -82,12 +82,6 @@ export async function writeDomain<T>(
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'light',
   heatmapPalette: 'default',
-  pomodoroDurations: {
-    workMinutes: 25,
-    shortBreakMinutes: 5,
-    longBreakMinutes: 15,
-    cyclesBeforeLongBreak: 4,
-  },
 };
 
 export async function getHabits(): Promise<Habit[]> {

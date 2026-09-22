@@ -10,14 +10,7 @@ import { Habit, HabitCompletion } from '../storage/types';
 
 const GREEN_PALETTE = ['#EBEDF0', '#CDECC3', '#9DDC93', '#43A047', '#1B5E20'];
 
-/**
- * Merges leaf 1.2.1's per-habit aggregateHeatmap across every habit into
- * one day-by-day completion COUNT. How multiple habits combine into a
- * single day's intensity is a presentation decision (this screen's own
- * call, per the original spec's GitHub-style "tracks daily habit
- * completions" — plural, aggregate — not a per-habit view), so it lives
- * here rather than as a change to leaf 1.2.1's single-habit primitive.
- */
+/** Merges the per-habit aggregateHeatmap output across every habit into one day-by-day completion count, for a GitHub-style combined view rather than per-habit. */
 export function mergeHeatmapAcrossHabits(
   habits: Habit[],
   completions: HabitCompletion[],
@@ -44,7 +37,7 @@ export function mergeHeatmapAcrossHabits(
   return merged;
 }
 
-/** 0-4 discrete steps, per Phase 2's "5 intensity steps derived from Accent at decreasing opacity." */
+/** 0-4 discrete intensity steps, derived from the accent color at decreasing opacity. */
 export function intensityStep(count: number): 0 | 1 | 2 | 3 | 4 {
   if (count <= 0) return 0;
   if (count === 1) return 1;

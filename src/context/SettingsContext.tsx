@@ -7,25 +7,14 @@ import React, {
   ReactNode,
 } from 'react';
 import { getSettings, setSettings as persistSettings, DEFAULT_SETTINGS } from '../storage/storage';
-import { Settings, ThemeMode, PomodoroDurations } from '../storage/types';
-
-/**
- * Generic result shape for a gated change attempt. `allowed: false` always
- * carries a `reason` so a screen can show *why*, not just fail silently.
- */
-export interface GateResult {
-  allowed: boolean;
-  reason?: string;
-}
+import { Settings, ThemeMode } from '../storage/types';
 
 interface SettingsContextValue {
   theme: ThemeMode;
   heatmapPalette: string;
-  pomodoroDurations: PomodoroDurations;
   isLoading: boolean;
   setTheme: (theme: ThemeMode) => Promise<void>;
   setHeatmapPalette: (palette: string) => Promise<void>;
-  setPomodoroDurations: (durations: PomodoroDurations) => Promise<void>;
 }
 
 const SettingsContext = createContext<SettingsContextValue | undefined>(
@@ -65,22 +54,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     [settings, persistAndSet]
   );
 
-  const setPomodoroDurations = useCallback(
-    (pomodoroDurations: PomodoroDurations) =>
-      persistAndSet({ ...settings, pomodoroDurations }),
-    [settings, persistAndSet]
-  );
-
   return (
     <SettingsContext.Provider
       value={{
         theme: settings.theme,
         heatmapPalette: settings.heatmapPalette,
-        pomodoroDurations: settings.pomodoroDurations,
         isLoading,
         setTheme,
         setHeatmapPalette,
-        setPomodoroDurations,
       }}
     >
       {children}

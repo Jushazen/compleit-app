@@ -1,23 +1,11 @@
 import React, { ReactNode } from 'react';
 import { SettingsProvider } from './SettingsContext';
-import { HabitProvider, AddHabitGate } from './HabitContext';
+import { HabitProvider } from './HabitContext';
 
-export interface ProviderTreeGates {
-  extraAddHabitGate?: AddHabitGate;
-}
-
-export function ProviderTree({
-  children,
-  gates = {},
-}: {
-  children: ReactNode;
-  gates?: ProviderTreeGates;
-}) {
+export function ProviderTree({ children }: { children: ReactNode }) {
   return (
     <SettingsProvider>
-      <HabitProvider addHabitGate={gates.extraAddHabitGate}>
-        {children}
-      </HabitProvider>
+      <HabitProvider>{children}</HabitProvider>
     </SettingsProvider>
   );
 }

@@ -1,13 +1,6 @@
 import { ThemeMode } from '../storage/types';
 
-/**
- * Direct translation of .tastemaker/style-lock.md into RN-usable values.
- * Every screen leaf imports getTokens(theme) rather than hardcoding a
- * color/spacing value itself, so the whole app stays on the one locked
- * palette from Phase 2 — see that file for the contrast-matrix rationale
- * behind these specific numbers, especially the light-mode accent
- * restriction noted below.
- */
+/** Every screen calls getTokens(theme) rather than hardcoding a color/spacing value, so the app stays on one shared palette. */
 export interface Tokens {
   background: string;
   surface: string;
@@ -34,9 +27,8 @@ const light: Tokens = {
   surface: '#FFFFFF',
   primary: '#2E2A25',
   onPrimary: '#FAF6EE',
-  // Per style-lock.md's Color contract: on light mode, accent is
-  // UI-safe (icons, rings, indicators) but NOT text-safe against the
-  // cream background — never use accent as small text/links here.
+  // On light mode, accent is UI-safe (icons, rings, indicators) but NOT
+  // text-safe against the cream background — never use it for small text/links.
   accent: '#D97A42',
   text: '#2E2A25',
   textMuted: '#8A8078',

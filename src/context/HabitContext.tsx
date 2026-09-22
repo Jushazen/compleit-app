@@ -14,20 +14,11 @@ import {
   setCompletions as persistCompletions,
 } from '../storage/storage';
 import { Habit, HabitCompletion } from '../storage/types';
-import { GateResult } from './SettingsContext';
-
-/**
- * A gate for adding a habit before it is persisted. Consumers can inject
- * a custom check here if the app needs one later.
- */
-export type AddHabitGate = (habit: Habit) => Promise<GateResult>;
-
-const defaultAddHabitGate: AddHabitGate = async () => ({ allowed: true });
 
 interface HabitContextValue {
   habits: Habit[];
   isLoading: boolean;
-  addHabit: (habit: Habit) => Promise<GateResult>;
+  addHabit: (habit: Habit) => Promise<void>;
   updateHabit: (habit: Habit) => Promise<void>;
   deleteHabit: (id: string) => Promise<void>;
   completions: HabitCompletion[];
@@ -38,30 +29,13 @@ const HabitContext = createContext<HabitContextValue | undefined>(undefined);
 
 interface HabitProviderProps {
   children: ReactNode;
-  addHabitGate?: AddHabitGate;
 }
 
-export function HabitProvider({
-  children,
-  addHabitGate = defaultAddHabitGate,
-}: HabitProviderProps) {
+export function HabitProvider({ children }: HabitProviderProps) {
   const [habits, setHabitsState] = useState<Habit[]>([]);
   const [completions, setCompletionsState] = useState<HabitCompletion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Bug fix (found while building leaf 1.4.1 / wave 5): the original
-  // version of this file read `habits`/`completions` from the closure
-  // and relied on the initial-hydration effect resolving before any
-  // write. If a write (e.g. addHabit) happened while hydration's
-  // AsyncStorage read was still in flight, whichever async op committed
-  // its setState LAST would silently win — a hydration read that
-  // resolves after a write would overwrite the just-written data with
-  // stale (pre-write) storage contents, and a write that resolves after
-  // hydration would build its `[...habits, x]` on a stale pre-hydration
-  // closure, losing anything hydration was about to load. Refs (synced
-  // synchronously, not subject to React 18's batching/timing for state
-  // updates) plus an explicit hydration gate that every write awaits
-  // FIRST closes both directions of that race.
   const habitsRef = useRef<Habit[]>([]);
   const completionsRef = useRef<HabitCompletion[]>([]);
 
@@ -95,20 +69,15 @@ export function HabitProvider({
   }, [ensureHydrated]);
 
   const addHabit = useCallback(
-    async (habit: Habit): Promise<GateResult> => {
+    async (habit: Habit): Promise<void> => {
       await ensureHydrated();
-      const result = await addHabitGate(habit);
-      if (result.allowed) {
-        const next = [...habitsRef.current, habit];
-        await persistHabits(next);
-        commitHabits(next);
-      }
-      return result;
+      const next = [...habitsRef.current, habit];
+      await persistHabits(next);
+      commitHabits(next);
     },
-    [addHabitGate, ensureHydrated, commitHabits]
+    [ensureHydrated, commitHabits]
   );
 
-  // Editing an existing habit is intentionally not gated by the add-habit gate.
   const updateHabit = useCallback(
     async (habit: Habit) => {
       await ensureHydrated();
@@ -119,11 +88,6 @@ export function HabitProvider({
     [ensureHydrated, commitHabits]
   );
 
-  // Deletion is NOT gated here — per leaf 1.2.3's gate G3, the 60-char
-  // confirmation requirement is enforced by whatever calls this (the
-  // screen), which must not offer any path to deleteHabit that skips its
-  // own confirmation flow. This context trusts that its caller already
-  // did that; it does not re-implement the confirmation itself.
   const deleteHabit = useCallback(
     async (id: string) => {
       await ensureHydrated();

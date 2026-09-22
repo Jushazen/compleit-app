@@ -1,13 +1,3 @@
-/**
- * All arithmetic here runs through Date.UTC/getUTCX so that walking
- * backward or forward day-by-day can never be bitten by a DST transition
- * (UTC has none) — this is what keeps leaf 1.2.1's aggregator/streak
- * functions pure per gate G3 ("no hidden clock/timezone dependency").
- * Callers convert a real, local "now" into a "YYYY-MM-DD" string exactly
- * once, at the boundary (see streak.ts) — everything past that boundary
- * only ever touches date *strings*, never the system clock.
- */
-
 export function toDateString(year: number, month: number, day: number): string {
   const mm = String(month).padStart(2, '0');
   const dd = String(day).padStart(2, '0');
@@ -19,7 +9,7 @@ export function parseDateString(dateStr: string): { year: number; month: number;
   return { year, month, day };
 }
 
-/** Local calendar date -> "YYYY-MM-DD", using the Date's local getters (the one place local time is deliberately used — see streak.ts's doc comment on why). */
+/** Local calendar date -> "YYYY-MM-DD". The one place local time is deliberately used; everything downstream works on the resulting string. */
 export function localDateToString(date: Date): string {
   return toDateString(date.getFullYear(), date.getMonth() + 1, date.getDate());
 }

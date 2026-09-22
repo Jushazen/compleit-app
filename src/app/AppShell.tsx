@@ -9,20 +9,6 @@ import { HeatmapScreen } from '../screens/Heatmap';
 import { SettingsScreen } from '../screens/Settings';
 import { Habit } from '../storage/types';
 
-/**
- * A deliberately lean custom navigator, not React Navigation. RN
- * navigation libraries pull in native modules of their own
- * (react-native-screens, react-native-safe-area-context, gesture-
- * handler) needing the same kind of real native build this environment
- * doesn't have (see README.md's platform-requirements section for the
- * same constraint on the Accessibility Service pieces) — a plain state-
- * driven screen switch avoids that dependency entirely and is fully
- * testable in this sandbox, at the cost of not having React Navigation's
- * built-in transitions/deep-linking/back-stack. If a future build phase
- * gets a real device to build against, swapping this for React
- * Navigation is a contained change (this file only), not something that
- * touches the screens themselves.
- */
 
 type Tab = 'home' | 'heatmap';
 

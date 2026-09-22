@@ -29,18 +29,9 @@ export interface Habit {
 
 export type ThemeMode = 'light' | 'dark';
 
-export interface PomodoroDurations {
-  workMinutes: number;
-  shortBreakMinutes: number;
-  longBreakMinutes: number;
-  /** How many work sessions before a long break is inserted instead of a short one. */
-  cyclesBeforeLongBreak: number;
-}
-
 export interface Settings {
   theme: ThemeMode;
   heatmapPalette: string;
-  pomodoroDurations: PomodoroDurations;
 }
 
 /** A completed occurrence of a habit, keyed by local calendar date. */
