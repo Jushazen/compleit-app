@@ -148,6 +148,7 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
         onChangeText={setTitle}
         testID="habit-form-title"
         placeholder="Habit title"
+        placeholderTextColor={tokens.textMuted}
       />
 
       <Text style={styles.label}>Notes</Text>
@@ -157,6 +158,7 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
         onChangeText={setNotes}
         testID="habit-form-notes"
         placeholder="Optional notes"
+        placeholderTextColor={tokens.textMuted}
       />
 
       <Text style={styles.label}>Track a target amount (optional)</Text>
@@ -169,6 +171,7 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
             onChangeText={setCountUnit}
             testID="habit-form-count-unit"
             placeholder="e.g. pages, glasses, minutes"
+            placeholderTextColor={tokens.textMuted}
           />
         </View>
         <View style={styles.countAmountInput}>
@@ -179,6 +182,7 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
             onChangeText={setCountAmount}
             testID="habit-form-count-amount"
             placeholder="e.g. 20"
+            placeholderTextColor={tokens.textMuted}
             keyboardType="numeric"
           />
         </View>
