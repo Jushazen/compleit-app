@@ -5,7 +5,7 @@ import { useSettings } from '../context/SettingsContext';
 import { getTokens } from '../theme/tokens';
 import { isScheduledOn } from '../logic/isScheduledOn';
 import { aggregateHeatmap } from '../logic/heatmap/aggregate';
-import { localDateToString, addDays } from '../logic/dateUtils';
+import { localDateToString, addDays, parseDateString } from '../logic/dateUtils';
 import { Habit, HabitCompletion } from '../storage/types';
 
 const GREEN_PALETTE = ['#EBEDF0', '#CDECC3', '#9DDC93', '#43A047', '#1B5E20'];
@@ -53,8 +53,6 @@ const PALETTE_OPACITIES: Record<string, [number, number, number, number, number]
 
 export interface HeatmapScreenProps {
   now?: () => Date;
-  /** Days of history to show, ending today. Defaults to 35 (5 weeks) — enough to prove month-grouping without a huge render. */
-  daysOfHistory?: number;
 }
 
 function buildMonthDays(currentMonth: Date): { date: Date; dateStr: string; inMonth: boolean }[] {
@@ -89,7 +87,7 @@ function getDisplayedMonthLabel(date: Date): string {
   return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 }
 
-export function HeatmapScreen({ now = () => new Date(), daysOfHistory = 35 }: HeatmapScreenProps) {
+export function HeatmapScreen({ now = () => new Date() }: HeatmapScreenProps) {
   const { habits, completions } = useHabits();
   const { theme, heatmapPalette } = useSettings();
   const tokens = getTokens(theme);
@@ -101,12 +99,16 @@ export function HeatmapScreen({ now = () => new Date(), daysOfHistory = 35 }: He
   const [selectedDate, setSelectedDate] = useState(todayStr);
 
   const monthKey = `${viewMonth.getFullYear()}-${String(viewMonth.getMonth() + 1).padStart(2, '0')}`;
-  const startStr = addDays(`${viewMonth.getFullYear()}-${String(viewMonth.getMonth() + 1).padStart(2, '0')}-01`, -(daysOfHistory - 1));
   const monthDays = useMemo(() => buildMonthDays(viewMonth), [viewMonth]);
+  // The grid pads with days from adjacent months, and the viewed month can be
+  // any month (not just the current one), so the data window must span exactly
+  // what's rendered rather than assuming it ends at "today".
+  const gridStartStr = monthDays[0].dateStr;
+  const gridEndStr = monthDays[monthDays.length - 1].dateStr;
 
   const merged = useMemo(
-    () => mergeHeatmapAcrossHabits(habits, completions, startStr, todayStr),
-    [habits, completions, startStr, todayStr]
+    () => mergeHeatmapAcrossHabits(habits, completions, gridStartStr, gridEndStr),
+    [habits, completions, gridStartStr, gridEndStr]
   );
 
   const monthCounts = useMemo(
@@ -201,7 +203,7 @@ export function HeatmapScreen({ now = () => new Date(), daysOfHistory = 35 }: He
                       isToday && styles.todayText,
                     ]}
                   >
-                    {new Date(dateStr).getDate()}
+                    {parseDateString(dateStr).day}
                   </Text>
                 </View>
               );

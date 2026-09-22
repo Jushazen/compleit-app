@@ -4,7 +4,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useHabits } from '../context/HabitContext';
 import { useSettings } from '../context/SettingsContext';
 import { getTokens } from '../theme/tokens';
-import { Habit, RepeatMode, DayOfWeek } from '../storage/types';
+import { Habit, RepeatMode, DayOfWeek, HabitTarget } from '../storage/types';
 
 const REPEAT_MODES: RepeatMode[] = ['daily', 'weekly', 'custom'];
 const DAY_LABELS: { label: string; value: DayOfWeek }[] = [
@@ -35,6 +35,18 @@ function formatTimeString(date: Date): string {
   return `${padTime(date.getHours())}:${padTime(date.getMinutes())}`;
 }
 
+/** "HH:mm" (24h, as stored) -> "h:mm AM/PM" for display. */
+function formatDisplayTime(value: string): string {
+  if (!value || !/^\d{2}:\d{2}$/.test(value)) {
+    return value;
+  }
+  const [hoursStr, minutesStr] = value.split(':');
+  const hours = Number(hoursStr);
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const displayHour = hours % 12 === 0 ? 12 : hours % 12;
+  return `${displayHour}:${minutesStr} ${period}`;
+}
+
 function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -56,6 +68,10 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
   const [days, setDays] = useState<DayOfWeek[]>(existingHabit?.schedule.days ?? []);
   const [startTime, setStartTime] = useState(existingHabit?.schedule.startTime ?? '09:00');
   const [endTime, setEndTime] = useState(existingHabit?.schedule.endTime ?? '17:00');
+  const [countUnit, setCountUnit] = useState(existingHabit?.target?.unit ?? '');
+  const [countAmount, setCountAmount] = useState(
+    existingHabit?.target?.amount !== undefined ? String(existingHabit.target.amount) : ''
+  );
   const [timePickerTarget, setTimePickerTarget] = useState<'start' | 'end' | null>(null);
   const [showTimePicker, setShowTimePicker] = useState(false);
 
@@ -95,8 +111,15 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
       endTime,
     };
 
+    const trimmedUnit = countUnit.trim();
+    const parsedAmount = Number(countAmount);
+    const target: HabitTarget | undefined =
+      trimmedUnit && countAmount.trim() && Number.isFinite(parsedAmount) && parsedAmount > 0
+        ? { unit: trimmedUnit, amount: parsedAmount }
+        : undefined;
+
     if (existingHabit) {
-      await updateHabit({ ...existingHabit, title, notes, schedule });
+      await updateHabit({ ...existingHabit, title, notes, schedule, target });
       onDone?.();
       return;
     }
@@ -106,12 +129,13 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
       title,
       notes,
       schedule,
+      target,
       createdAt: new Date().toISOString(),
     };
 
     await addHabit(newHabit);
     onDone?.();
-  }, [existingHabit, title, notes, repeat, days, startTime, endTime, addHabit, updateHabit, onDone]);
+  }, [existingHabit, title, notes, repeat, days, startTime, endTime, countUnit, countAmount, addHabit, updateHabit, onDone]);
 
   const timePickerValue = timePickerTarget === 'start' ? parseTimeString(startTime) : parseTimeString(endTime);
 
@@ -134,6 +158,31 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
         testID="habit-form-notes"
         placeholder="Optional notes"
       />
+
+      <Text style={styles.label}>Track a target amount (optional)</Text>
+      <View style={styles.countRow}>
+        <View style={styles.countUnitInput}>
+          <Text style={styles.countFieldLabel}>What are you tracking?</Text>
+          <TextInput
+            style={styles.input}
+            value={countUnit}
+            onChangeText={setCountUnit}
+            testID="habit-form-count-unit"
+            placeholder="e.g. pages, glasses, minutes"
+          />
+        </View>
+        <View style={styles.countAmountInput}>
+          <Text style={styles.countFieldLabel}>Target</Text>
+          <TextInput
+            style={styles.input}
+            value={countAmount}
+            onChangeText={setCountAmount}
+            testID="habit-form-count-amount"
+            placeholder="e.g. 20"
+            keyboardType="numeric"
+          />
+        </View>
+      </View>
 
       <Text style={styles.label}>Repeat</Text>
       <View style={styles.segmented} testID="habit-form-repeat">
@@ -168,12 +217,12 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
 
       <Text style={styles.label}>Start time</Text>
       <Pressable style={styles.timePickerButton} onPress={() => openTimePicker('start')} testID="habit-form-start-time-button">
-        <Text style={styles.timePickerText}>{startTime}</Text>
+        <Text style={styles.timePickerText}>{formatDisplayTime(startTime)}</Text>
       </Pressable>
 
       <Text style={styles.label}>End time</Text>
       <Pressable style={styles.timePickerButton} onPress={() => openTimePicker('end')} testID="habit-form-end-time-button">
-        <Text style={styles.timePickerText}>{endTime}</Text>
+        <Text style={styles.timePickerText}>{formatDisplayTime(endTime)}</Text>
       </Pressable>
 
       {showTimePicker && timePickerTarget && (
@@ -181,6 +230,7 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
           value={timePickerValue}
           mode="time"
           display="spinner"
+          is24Hour={false}
           onChange={handleTimeChange}
         />
       )}
@@ -201,6 +251,10 @@ function makeStyles(tokens: ReturnType<typeof getTokens>) {
     container: { backgroundColor: tokens.background, paddingHorizontal: tokens.space6, paddingVertical: tokens.space6 },
     label: { fontSize: 13, color: tokens.textMuted, marginTop: tokens.space4, marginBottom: tokens.space2 },
     input: { backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, borderRadius: tokens.radiusMd, padding: tokens.space3, color: tokens.text },
+    countRow: { flexDirection: 'row', gap: tokens.space2 },
+    countUnitInput: { flex: 2 },
+    countAmountInput: { flex: 1 },
+    countFieldLabel: { fontSize: 12, color: tokens.textMuted, marginBottom: tokens.space1 },
     segmented: { flexDirection: 'row', gap: tokens.space2 },
     segment: { flex: 1, alignItems: 'center', paddingVertical: tokens.space3, borderRadius: tokens.radiusMd, backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border },
     segmentLabel: { fontSize: 13, color: tokens.text },

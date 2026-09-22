@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { useHabits } from '../context/HabitContext';
 import { useSettings } from '../context/SettingsContext';
@@ -14,6 +14,45 @@ export function todaysHabits(habits: Habit[], now: Date): Habit[] {
     isScheduledOn(h.schedule, todayStr, h.createdAt.slice(0, 10))
   );
 }
+
+function minutesSinceMidnight(hhmm: string): number {
+  const [hours, minutes] = hhmm.split(':').map(Number);
+  return hours * 60 + minutes;
+}
+
+/** "HH:mm" (24h, as stored) -> "h:mm AM/PM" for display. */
+function formatClockTime(hhmm: string): string {
+  const [hoursStr, minutesStr] = hhmm.split(':');
+  const hours = Number(hoursStr);
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const displayHour = hours % 12 === 0 ? 12 : hours % 12;
+  return `${displayHour}:${minutesStr} ${period}`;
+}
+
+function formatTimeRange(habit: Habit): string {
+  return `${formatClockTime(habit.schedule.startTime)} - ${formatClockTime(habit.schedule.endTime)}`;
+}
+
+function formatTarget(habit: Habit): string | null {
+  return habit.target ? `Target: ${habit.target.amount} ${habit.target.unit}` : null;
+}
+
+type HabitBucket = 'missed' | 'due' | 'upcoming' | 'completed';
+
+/** Which of the day's four sections a habit belongs in, given whether it's already completed and the current time-of-day. */
+function bucketFor(habit: Habit, completed: boolean, currentMinutes: number): HabitBucket {
+  if (completed) return 'completed';
+  if (currentMinutes > minutesSinceMidnight(habit.schedule.endTime)) return 'missed';
+  if (currentMinutes >= minutesSinceMidnight(habit.schedule.startTime)) return 'due';
+  return 'upcoming';
+}
+
+const SECTIONS: { key: HabitBucket; title: string }[] = [
+  { key: 'missed', title: 'Missed' },
+  { key: 'due', title: 'Must complete' },
+  { key: 'upcoming', title: 'Upcoming' },
+  { key: 'completed', title: 'Completed' },
+];
 
 export interface HomeScreenProps {
   /** Injectable for tests — defaults to the real clock. */
@@ -63,6 +102,20 @@ export function HomeScreen({ now = () => new Date(), onAddHabit }: HomeScreenPro
 
   const completedCount = today.filter((h) => isCompletedToday(h.id)).length;
 
+  const currentMinutes = currentNow.getHours() * 60 + currentNow.getMinutes();
+
+  const sections = useMemo(() => {
+    const buckets: Record<HabitBucket, Habit[]> = { missed: [], due: [], upcoming: [], completed: [] };
+    for (const habit of today) {
+      const bucket = bucketFor(habit, isCompletedToday(habit.id), currentMinutes);
+      buckets[bucket].push(habit);
+    }
+    const byStartTime = (a: Habit, b: Habit) =>
+      minutesSinceMidnight(a.schedule.startTime) - minutesSinceMidnight(b.schedule.startTime);
+    (Object.keys(buckets) as HabitBucket[]).forEach((key) => buckets[key].sort(byStartTime));
+    return buckets;
+  }, [today, isCompletedToday, currentMinutes]);
+
   const styles = makeStyles(tokens);
 
   return (
@@ -91,6 +144,12 @@ export function HomeScreen({ now = () => new Date(), onAddHabit }: HomeScreenPro
         </Text>
       )}
 
+      {habits.length > 0 && today.length === 0 && (
+        <Text style={styles.emptyState} testID="home-empty-today">
+          Nothing scheduled today.
+        </Text>
+      )}
+
       {onAddHabit && (
         <Pressable onPress={onAddHabit} testID="home-add-habit" style={styles.addHabitButton}>
           <Text style={styles.addHabitLabel}>Add habit</Text>
@@ -98,45 +157,24 @@ export function HomeScreen({ now = () => new Date(), onAddHabit }: HomeScreenPro
       )}
 
       <ScrollView testID="today-habit-list">
-        {today.map((item) => {
-          const completed = isCompletedToday(item.id);
-          const streak = calculateStreak(item, completions, currentNow);
+        {SECTIONS.map(({ key, title }) => {
+          const items = sections[key];
+          if (items.length === 0) return null;
+
           return (
-            <View style={styles.habitCard} testID={`habit-card-${item.id}`} key={item.id}>
-              <View style={styles.habitInfo}>
-                <Text style={styles.habitTitle}>{item.title}</Text>
-                <Text style={styles.habitMeta}>
-                  {completed ? 'Completed today' : `${streak}-day streak`}
-                </Text>
-              </View>
-              <View style={styles.habitActions}>
-                <Pressable
-                  onPress={() => handleTap(item)}
-                  testID={`habit-complete-${item.id}`}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: completed }}
-                  style={[
-                    styles.completeButton,
-                    completed && styles.completeButtonActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.completeButtonText,
-                      completed && styles.completeButtonTextActive,
-                    ]}
-                  >
-                    {completed ? '✓' : 'Complete'}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => startDelete(item)}
-                  testID={`habit-delete-${item.id}`}
-                  accessibilityLabel={`Delete ${item.title}`}
-                >
-                  <Text style={styles.deleteLabel}>Delete</Text>
-                </Pressable>
-              </View>
+            <View style={styles.section} testID={`section-${key}`} key={key}>
+              <Text style={styles.sectionTitle}>{`${title} (${items.length})`}</Text>
+              {items.map((item) => (
+                <HabitCard
+                  key={item.id}
+                  habit={item}
+                  completed={key === 'completed'}
+                  streak={calculateStreak(item, completions, currentNow)}
+                  styles={styles}
+                  onComplete={() => handleTap(item)}
+                  onDelete={() => startDelete(item)}
+                />
+              ))}
             </View>
           );
         })}
@@ -159,6 +197,57 @@ export function HomeScreen({ now = () => new Date(), onAddHabit }: HomeScreenPro
   );
 }
 
+function HabitCard({
+  habit,
+  completed,
+  streak,
+  styles,
+  onComplete,
+  onDelete,
+}: {
+  habit: Habit;
+  completed: boolean;
+  streak: number;
+  styles: ReturnType<typeof makeStyles>;
+  onComplete: () => void;
+  onDelete: () => void;
+}) {
+  const metaParts = [
+    completed ? 'Completed today' : `${streak}-day streak`,
+    formatTimeRange(habit),
+    formatTarget(habit),
+  ].filter((part): part is string => Boolean(part));
+
+  return (
+    <View style={styles.habitCard} testID={`habit-card-${habit.id}`}>
+      <View style={styles.habitInfo}>
+        <Text style={styles.habitTitle}>{habit.title}</Text>
+        <Text style={styles.habitMeta}>{metaParts.join(' • ')}</Text>
+      </View>
+      <View style={styles.habitActions}>
+        <Pressable
+          onPress={onComplete}
+          testID={`habit-complete-${habit.id}`}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: completed }}
+          style={[styles.completeButton, completed && styles.completeButtonActive]}
+        >
+          <Text style={[styles.completeButtonText, completed && styles.completeButtonTextActive]}>
+            {completed ? '✓' : 'Complete'}
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={onDelete}
+          testID={`habit-delete-${habit.id}`}
+          accessibilityLabel={`Delete ${habit.title}`}
+        >
+          <Text style={styles.deleteLabel}>Delete</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 function makeStyles(tokens: ReturnType<typeof getTokens>) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: tokens.background, paddingHorizontal: tokens.space6 },
@@ -170,6 +259,15 @@ function makeStyles(tokens: ReturnType<typeof getTokens>) {
     emptyState: { fontSize: 14, color: tokens.textMuted, textAlign: 'center', marginBottom: tokens.space4 },
     addHabitButton: { backgroundColor: tokens.primary, borderRadius: tokens.radiusMd, paddingVertical: tokens.space3, alignItems: 'center', marginBottom: tokens.space4 },
     addHabitLabel: { color: tokens.onPrimary, fontSize: 14, fontWeight: '600' },
+    section: { marginBottom: tokens.space6 },
+    sectionTitle: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: tokens.textMuted,
+      marginBottom: tokens.space2,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
     habitCard: { backgroundColor: tokens.surface, borderColor: tokens.border, borderWidth: 1, borderRadius: tokens.radiusLg, padding: tokens.space6, marginBottom: tokens.space3, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     habitInfo: { flex: 1, marginRight: tokens.space4 },
     habitTitle: { fontSize: 15, fontWeight: '600', color: tokens.text },

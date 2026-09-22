@@ -19,11 +19,18 @@ export interface HabitSchedule {
   endTime: string;
 }
 
+/** An optional measurable goal for a habit, e.g. { unit: 'pages', amount: 20 }. */
+export interface HabitTarget {
+  unit: string;
+  amount: number;
+}
+
 export interface Habit {
   id: string;
   title: string;
   notes: string;
   schedule: HabitSchedule;
+  target?: HabitTarget;
   createdAt: string; // ISO 8601
 }
 
