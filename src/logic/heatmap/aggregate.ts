@@ -8,12 +8,6 @@ export interface HeatmapDay {
 
 export type HeatmapByMonth = Record<string, HeatmapDay[]>; // key: "YYYY-MM"
 
-/**
- * Builds a GitHub-style, month-grouped completion grid for one habit
- * between `startDateStr` and `endDateStr` (inclusive, both "YYYY-MM-DD").
- * Pure: takes its date range as explicit strings, never touches the
- * system clock — the caller decides what range "now" maps to.
- */
 export function aggregateHeatmap(
   habitId: string,
   completions: HabitCompletion[],

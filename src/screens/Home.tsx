@@ -55,27 +55,26 @@ const SECTIONS: { key: HabitBucket; title: string }[] = [
 ];
 
 export interface HomeScreenProps {
-  /** Injectable for tests — defaults to the real clock. */
-  now?: () => Date;
   onAddHabit?: () => void;
 }
 
-export function HomeScreen({ now = () => new Date(), onAddHabit }: HomeScreenProps) {
+export function HomeScreen({ onAddHabit }: HomeScreenProps) {
   const { habits, completions, recordCompletion, deleteHabit } = useHabits();
   const { theme } = useSettings();
   const tokens = getTokens(theme);
 
   const [deleteTarget, setDeleteTarget] = useState<Habit | null>(null);
 
-  const currentNow = now();
+  const currentNow = new Date();
+  const todayStr = localDateToString(currentNow);
   const today = todaysHabits(habits, currentNow);
 
   const handleTap = useCallback(
     async (habit: Habit) => {
-      const tapNow = now();
+      const tapNow = new Date();
       await recordCompletion(habit.id, localDateToString(tapNow));
     },
-    [now, recordCompletion]
+    [recordCompletion]
   );
 
   const startDelete = useCallback((habit: Habit) => {
@@ -93,11 +92,8 @@ export function HomeScreen({ now = () => new Date(), onAddHabit }: HomeScreenPro
   }, []);
 
   const isCompletedToday = useCallback(
-    (habitId: string) => {
-      const todayStr = localDateToString(currentNow);
-      return completions.some((c) => c.habitId === habitId && c.date === todayStr);
-    },
-    [completions, currentNow]
+    (habitId: string) => completions.some((c) => c.habitId === habitId && c.date === todayStr),
+    [completions, todayStr]
   );
 
   const completedCount = today.filter((h) => isCompletedToday(h.id)).length;
@@ -119,10 +115,10 @@ export function HomeScreen({ now = () => new Date(), onAddHabit }: HomeScreenPro
   const styles = makeStyles(tokens);
 
   return (
-    <View style={styles.container} testID="home-screen">
+    <View style={styles.container}>
       <Text style={styles.header}>Today</Text>
 
-      <View style={styles.ringCard} testID="ring-card">
+      <View style={styles.ringCard}>
         <Text style={styles.ringLabel}>
           {`${completedCount} of ${today.length} done`}
         </Text>
@@ -139,30 +135,30 @@ export function HomeScreen({ now = () => new Date(), onAddHabit }: HomeScreenPro
       </View>
 
       {habits.length === 0 && (
-        <Text style={styles.emptyState} testID="home-empty-state">
+        <Text style={styles.emptyState}>
           No habits yet. Add one to get started.
         </Text>
       )}
 
       {habits.length > 0 && today.length === 0 && (
-        <Text style={styles.emptyState} testID="home-empty-today">
+        <Text style={styles.emptyState}>
           Nothing scheduled today.
         </Text>
       )}
 
       {onAddHabit && (
-        <Pressable onPress={onAddHabit} testID="home-add-habit" style={styles.addHabitButton}>
+        <Pressable onPress={onAddHabit} style={styles.addHabitButton}>
           <Text style={styles.addHabitLabel}>Add habit</Text>
         </Pressable>
       )}
 
-      <ScrollView testID="today-habit-list">
+      <ScrollView>
         {SECTIONS.map(({ key, title }) => {
           const items = sections[key];
           if (items.length === 0) return null;
 
           return (
-            <View style={styles.section} testID={`section-${key}`} key={key}>
+            <View style={styles.section} key={key}>
               <Text style={styles.sectionTitle}>{`${title} (${items.length})`}</Text>
               {items.map((item) => (
                 <HabitCard
@@ -181,14 +177,14 @@ export function HomeScreen({ now = () => new Date(), onAddHabit }: HomeScreenPro
       </ScrollView>
 
       {deleteTarget && (
-        <View style={styles.confirmOverlay} testID="delete-confirm-overlay">
+        <View style={styles.confirmOverlay}>
           <Text style={styles.confirmPrompt}>
             Delete "{deleteTarget.title}"?
           </Text>
-          <Pressable onPress={confirmDelete} testID="delete-confirm-submit">
+          <Pressable onPress={confirmDelete}>
             <Text style={styles.confirmSubmitLabel}>Delete</Text>
           </Pressable>
-          <Pressable onPress={cancelDelete} testID="delete-confirm-cancel">
+          <Pressable onPress={cancelDelete}>
             <Text style={styles.confirmCancelLabel}>Cancel</Text>
           </Pressable>
         </View>
@@ -219,7 +215,7 @@ function HabitCard({
   ].filter((part): part is string => Boolean(part));
 
   return (
-    <View style={styles.habitCard} testID={`habit-card-${habit.id}`}>
+    <View style={styles.habitCard}>
       <View style={styles.habitInfo}>
         <Text style={styles.habitTitle}>{habit.title}</Text>
         <Text style={styles.habitMeta}>{metaParts.join(' • ')}</Text>
@@ -227,7 +223,6 @@ function HabitCard({
       <View style={styles.habitActions}>
         <Pressable
           onPress={onComplete}
-          testID={`habit-complete-${habit.id}`}
           accessibilityRole="checkbox"
           accessibilityState={{ checked: completed }}
           style={[styles.completeButton, completed && styles.completeButtonActive]}
@@ -238,7 +233,6 @@ function HabitCard({
         </Pressable>
         <Pressable
           onPress={onDelete}
-          testID={`habit-delete-${habit.id}`}
           accessibilityLabel={`Delete ${habit.title}`}
         >
           <Text style={styles.deleteLabel}>Delete</Text>

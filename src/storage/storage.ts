@@ -6,10 +6,6 @@ import {
   HabitCompletion,
 } from './types';
 
-/**
- * Every value on disk is wrapped in a version envelope so a future
- * migration can tell an old shape apart from the current one.
- */
 interface Envelope<T> {
   version: number;
   data: T;

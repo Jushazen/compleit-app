@@ -13,7 +13,7 @@ export function calculateStreak(
     completions.filter((c) => c.habitId === habit.id).map((c) => c.date)
   );
   const todayStr = localDateToString(now);
-  const createdAtStr = habit.createdAt.slice(0, 10); // createdAt is ISO 8601; the date portion is what bounds the walk
+  const createdAtStr = habit.createdAt.slice(0, 10);
 
   let streak = 0;
   let cursor = todayStr;

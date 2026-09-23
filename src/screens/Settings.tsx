@@ -48,7 +48,7 @@ export function SettingsScreen({ compact = false }: { compact?: boolean }) {
   );
 
   return (
-    <View style={compact ? styles.dropdownContainer : styles.container} testID="settings-screen">
+    <View style={compact ? styles.dropdownContainer : styles.container}>
       {!compact && <Text style={styles.header}>Settings</Text>}
 
       <View style={styles.row}>
@@ -60,7 +60,6 @@ export function SettingsScreen({ compact = false }: { compact?: boolean }) {
             <Pressable
               key={mode}
               onPress={() => setTheme(mode)}
-              testID={`theme-${mode}`}
               style={[
                 styles.modeButton,
                 isActive && styles.activeModeButton,

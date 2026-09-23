@@ -92,7 +92,7 @@ export function AppShell() {
   ];
 
   return (
-    <View style={styles.root} testID="app-shell">
+    <View style={styles.root}>
       <View style={styles.screenArea}>
         {tab === 'home' && (
           <HomeScreen
@@ -102,12 +102,11 @@ export function AppShell() {
         {tab === 'heatmap' && <HeatmapScreen />}
       </View>
 
-      <View style={styles.tabBar} testID="app-tab-bar">
+      <View style={styles.tabBar}>
         {TAB_ITEMS.map((t) => (
           <Pressable
             key={t.key}
             onPress={() => handleTabPress(t.key)}
-            testID={`tab-${t.key}`}
             style={[
               styles.tabItem,
               tab === t.key && styles.activeTabItem,
@@ -125,7 +124,6 @@ export function AppShell() {
 
         <Pressable
           onPress={() => setSettingsMenuOpen((prev) => !prev)}
-          testID="tab-settings"
           style={styles.settingsToggle}
         >
           <View style={styles.navIconContainer}>
@@ -144,9 +142,9 @@ export function AppShell() {
       )}
 
       {modal?.type === 'habitForm' && (
-        <View style={styles.modalOverlay} testID="modal-habit-form">
+        <View style={styles.modalOverlay}>
           <HabitFormScreen existingHabit={modal.existingHabit} onDone={closeModal} />
-          <Pressable onPress={closeModal} testID="modal-close" style={styles.modalClose}>
+          <Pressable onPress={closeModal} style={styles.modalClose}>
             <Svg width={26} height={26} viewBox="0 0 24 24" fill="none">
               <Circle cx="12" cy="12" r="10" stroke={tokens.accent} strokeWidth={2} />
               <Path d="M8 8L16 16M16 8L8 16" stroke={tokens.accent} strokeWidth={2.2} strokeLinecap="round" />

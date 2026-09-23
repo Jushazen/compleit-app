@@ -155,7 +155,7 @@ export function HeatmapScreen({ now = () => new Date() }: HeatmapScreenProps) {
   const selectedIsToday = selectedDate === todayStr;
 
   return (
-    <View style={styles.container} testID="heatmap-screen">
+    <View style={styles.container}>
       <Text style={styles.header}>Activity</Text>
 
       <View style={styles.column}>
@@ -194,7 +194,6 @@ export function HeatmapScreen({ now = () => new Date() }: HeatmapScreenProps) {
                   <Pressable
                     onPress={() => setSelectedDate(dateStr)}
                     style={[styles.dateCell, { backgroundColor: fill, opacity: cellOpacity }, borderStyle]}
-                    testID={`heatmap-day-${dateStr}`}
                   />
                   <Text
                     style={[

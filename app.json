@@ -1,4 +1,21 @@
 {
-  "name": "compleitApp",
-  "displayName": "Compleit"
+  "expo": {
+    "name": "Compleit",
+    "slug": "compleit",
+    "scheme": "compleit",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.compleitapp",
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "com.compleitapp"
+    },
+    "plugins": [
+      "@react-native-community/datetimepicker"
+    ]
+  }
 }

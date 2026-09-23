@@ -63,8 +63,10 @@ yarn-error.log
 # Temporary files created by Metro to check the health of the file watcher
 .metro-health-check*
 
-# testing
-/coverage
+# Expo
+.expo/
+dist/
+expo-env.d.ts
 
 # Yarn
 .yarn/*

@@ -140,13 +140,12 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
   const timePickerValue = timePickerTarget === 'start' ? parseTimeString(startTime) : parseTimeString(endTime);
 
   return (
-    <View style={styles.container} testID="habit-form-screen">
+    <View style={styles.container}>
       <Text style={styles.label}>Title</Text>
       <TextInput
         style={styles.input}
         value={title}
         onChangeText={setTitle}
-        testID="habit-form-title"
         placeholder="Habit title"
         placeholderTextColor={tokens.textMuted}
       />
@@ -156,7 +155,6 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
         style={styles.input}
         value={notes}
         onChangeText={setNotes}
-        testID="habit-form-notes"
         placeholder="Optional notes"
         placeholderTextColor={tokens.textMuted}
       />
@@ -169,7 +167,6 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
             style={styles.input}
             value={countUnit}
             onChangeText={setCountUnit}
-            testID="habit-form-count-unit"
             placeholder="e.g. pages, glasses, minutes"
             placeholderTextColor={tokens.textMuted}
           />
@@ -180,7 +177,6 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
             style={styles.input}
             value={countAmount}
             onChangeText={setCountAmount}
-            testID="habit-form-count-amount"
             placeholder="e.g. 20"
             placeholderTextColor={tokens.textMuted}
             keyboardType="numeric"
@@ -189,12 +185,11 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
       </View>
 
       <Text style={styles.label}>Repeat</Text>
-      <View style={styles.segmented} testID="habit-form-repeat">
+      <View style={styles.segmented}>
         {REPEAT_MODES.map((mode) => (
           <Pressable
             key={mode}
             onPress={() => setRepeat(mode)}
-            testID={`repeat-${mode}`}
             style={[styles.segment, repeat === mode && { backgroundColor: tokens.primary }]}
           >
             <Text style={[styles.segmentLabel, repeat === mode && { color: tokens.onPrimary }]}>
@@ -205,12 +200,11 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
       </View>
 
       {repeat === 'custom' && (
-        <View style={styles.dayRow} testID="habit-form-days">
+        <View style={styles.dayRow}>
           {DAY_LABELS.map(({ label, value }) => (
             <Pressable
               key={value}
               onPress={() => toggleDay(value)}
-              testID={`day-toggle-${value}`}
               style={[styles.dayChip, days.includes(value) && { backgroundColor: tokens.accent }]}
             >
               <Text style={styles.dayChipLabel}>{label}</Text>
@@ -220,12 +214,12 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
       )}
 
       <Text style={styles.label}>Start time</Text>
-      <Pressable style={styles.timePickerButton} onPress={() => openTimePicker('start')} testID="habit-form-start-time-button">
+      <Pressable style={styles.timePickerButton} onPress={() => openTimePicker('start')}>
         <Text style={styles.timePickerText}>{formatDisplayTime(startTime)}</Text>
       </Pressable>
 
       <Text style={styles.label}>End time</Text>
-      <Pressable style={styles.timePickerButton} onPress={() => openTimePicker('end')} testID="habit-form-end-time-button">
+      <Pressable style={styles.timePickerButton} onPress={() => openTimePicker('end')}>
         <Text style={styles.timePickerText}>{formatDisplayTime(endTime)}</Text>
       </Pressable>
 
@@ -242,7 +236,6 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
       <Pressable
         style={styles.submitButton}
         onPress={handleSubmit}
-        testID="habit-form-submit"
       >
         <Text style={styles.submitText}>{existingHabit ? 'Save' : 'Add habit'}</Text>
       </Pressable>
