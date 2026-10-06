@@ -1,175 +1,225 @@
-import React, { useState, useCallback } from 'react';
-import { View, StyleSheet, Pressable} from 'react-native';
-import Svg, { Path, Circle, Rect, Line } from 'react-native-svg';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  BackHandler,
+  Pressable,
+  StyleSheet,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Icon } from '../components/icons';
 import { useSettings } from '../context/SettingsContext';
-import { getTokens } from '../theme/tokens';
-import { HomeScreen } from '../screens/Home';
+import { useThemedStyles, useTokens } from '../hooks/useTheme';
 import { HabitFormScreen } from '../screens/HabitForm';
 import { HeatmapScreen } from '../screens/Heatmap';
-import { SettingsScreen } from '../screens/Settings';
-import { Habit } from '../storage/types';
-
+import { HomeScreen } from '../screens/Home';
+import type { Habit } from '../storage/types';
+import type { Tokens } from '../theme/tokens';
+import { ThemeMenu } from './ThemeMenu';
 
 type Tab = 'home' | 'heatmap';
 
-type IconKind = 'home' | 'heatmap' | 'sun' | 'moon';
+/** `null` = closed; open with no habit to add one, or with `existingHabit` to edit it. */
+type FormModal = { existingHabit?: Habit } | null;
 
-function NavIcon({ kind, color, size = 18 }: { kind: IconKind; color: string; size?: number }) {
-  const strokeWidth = 2.2;
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'home', label: 'Home' },
+  { key: 'heatmap', label: 'Heatmap' },
+];
 
-  switch (kind) {
-    case 'home':
-      return (
-        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-          <Path
-            d="M3 10.5L12 3L21 10.5V19.5C21 20.33 20.33 21 19.5 21H14V14H10V21H4.5C3.67 21 3 20.33 3 19.5V10.5Z"
-            stroke={color}
-            strokeWidth={strokeWidth}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </Svg>
-      );
-    case 'heatmap':
-      return (
-        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-          <Rect x="3" y="3" width="6" height="6" rx="1.5" stroke={color} strokeWidth={strokeWidth} />
-          <Rect x="15" y="3" width="6" height="4" rx="1.5" stroke={color} strokeWidth={strokeWidth} />
-          <Rect x="3" y="15" width="10" height="6" rx="1.5" stroke={color} strokeWidth={strokeWidth} />
-          <Rect x="15" y="11" width="6" height="10" rx="1.5" stroke={color} strokeWidth={strokeWidth} />
-        </Svg>
-      );
-    case 'sun':
-      return (
-        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-          <Circle cx="12" cy="12" r="4.5" stroke={color} strokeWidth={strokeWidth} />
-          <Line x1="12" y1="1.5" x2="12" y2="4.2" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-          <Line x1="12" y1="19.8" x2="12" y2="22.5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-          <Line x1="1.5" y1="12" x2="4.2" y2="12" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-          <Line x1="19.8" y1="12" x2="22.5" y2="12" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-          <Line x1="4.1" y1="4.1" x2="6.1" y2="6.1" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-          <Line x1="17.9" y1="17.9" x2="19.9" y2="19.9" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-          <Line x1="4.1" y1="19.9" x2="6.1" y2="17.9" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-          <Line x1="17.9" y1="6.1" x2="19.9" y2="4.1" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-        </Svg>
-      );
-    case 'moon':
-      return (
-        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-          <Path
-            d="M18.5 15.5C17.2 16.6 15.6 17.2 13.9 17.2C9.7 17.2 6.2 13.7 6.2 9.5C6.2 7.8 6.8 6.2 7.9 4.9C5.8 5.6 4.2 7.6 4.2 10C4.2 14.2 7.7 17.7 11.9 17.7C14.3 17.7 16.3 16.8 18.5 15.5Z"
-            stroke={color}
-            strokeWidth={strokeWidth}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </Svg>
-      );
-    default:
-      return null;
-  }
-}
+/** Gap between the status bar and the active screen. */
+const SCREEN_TOP_GAP = 6;
+/** Space between the top of the tab bar and the theme dropdown's pointer. */
+const DROPDOWN_GAP = 15;
+/** Distance of the theme dropdown and modal close button from the right edge. */
+const EDGE_OFFSET = 18;
+/** Extra space between the status bar and the form modal's content. */
+const MODAL_TOP_GAP = 5;
+/** Offset of the modal close button below the form modal's content top. */
+const MODAL_CLOSE_OFFSET = 20;
 
 export function AppShell() {
   const { theme } = useSettings();
-  const tokens = getTokens(theme);
-  const styles = makeStyles(tokens);
+  const tokens = useTokens();
+  const styles = useThemedStyles(makeStyles);
+  const insets = useSafeAreaInsets();
 
   const [tab, setTab] = useState<Tab>('home');
-  const [modal, setModal] = useState<ModalState>(null);
-  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  const [formModal, setFormModal] = useState<FormModal>(null);
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false);
+  const [tabBarHeight, setTabBarHeight] = useState(0);
 
-  const closeModal = useCallback(() => setModal(null), []);
+  const openForm = useCallback((modal: NonNullable<FormModal>) => {
+    setThemeMenuOpen(false);
+    setFormModal(modal);
+  }, []);
+  const openNewHabit = useCallback(() => openForm({}), [openForm]);
+  const openEditHabit = useCallback(
+    (habit: Habit) => openForm({ existingHabit: habit }),
+    [openForm],
+  );
+  const closeForm = useCallback(() => setFormModal(null), []);
+  const closeThemeMenu = useCallback(() => setThemeMenuOpen(false), []);
 
   const handleTabPress = (nextTab: Tab) => {
-    setSettingsMenuOpen(false);
+    setThemeMenuOpen(false);
     setTab(nextTab);
   };
 
-  const TAB_ITEMS: { key: Tab; icon: IconKind }[] = [
-    { key: 'home', icon: 'home' },
-    { key: 'heatmap', icon: 'heatmap' },
-  ];
+  const handleTabBarLayout = (event: LayoutChangeEvent) =>
+    setTabBarHeight(event.nativeEvent.layout.height);
+
+  // Android back closes the form modal, then the theme menu, before leaving the app.
+  const backClosesSomething = formModal !== null || themeMenuOpen;
+  useEffect(() => {
+    if (!backClosesSomething) {
+      return;
+    }
+    const subscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      () => {
+        if (formModal) {
+          setFormModal(null);
+        } else {
+          setThemeMenuOpen(false);
+        }
+        return true;
+      },
+    );
+    return () => subscription.remove();
+  }, [backClosesSomething, formModal]);
+
+  const horizontalInsets = {
+    paddingLeft: insets.left,
+    paddingRight: insets.right,
+  };
 
   return (
     <View style={styles.root}>
-      <View style={styles.screenArea}>
+      <View
+        style={[
+          styles.screenArea,
+          horizontalInsets,
+          { paddingTop: insets.top + SCREEN_TOP_GAP },
+        ]}
+      >
         {tab === 'home' && (
-          <HomeScreen
-            onAddHabit={() => setModal({ type: 'habitForm' })}
-          />
+          <HomeScreen onAddHabit={openNewHabit} onEditHabit={openEditHabit} />
         )}
         {tab === 'heatmap' && <HeatmapScreen />}
       </View>
 
-      <View style={styles.tabBar}>
-        {TAB_ITEMS.map((t) => (
-          <Pressable
-            key={t.key}
-            onPress={() => handleTabPress(t.key)}
-            style={[
-              styles.tabItem,
-              tab === t.key && styles.activeTabItem,
-            ]}
-          >
-            <View style={styles.navIconContainer}>
-              <NavIcon
-                kind={t.icon}
-                color={tab === t.key ? tokens.accent : tokens.textMuted}
+      <View
+        style={[
+          styles.tabBar,
+          { paddingBottom: tokens.space4 + insets.bottom },
+        ]}
+        onLayout={handleTabBarLayout}
+      >
+        {TABS.map(({ key, label }) => {
+          const isActive = tab === key;
+          return (
+            <Pressable
+              key={key}
+              onPress={() => handleTabPress(key)}
+              accessibilityRole="tab"
+              accessibilityLabel={label}
+              accessibilityState={{ selected: isActive }}
+              style={[styles.navButton, isActive && styles.activeNavButton]}
+            >
+              <Icon
+                kind={key}
+                color={isActive ? tokens.accent : tokens.textMuted}
                 size={20}
               />
-            </View>
-          </Pressable>
-        ))}
+            </Pressable>
+          );
+        })}
 
         <Pressable
-          onPress={() => setSettingsMenuOpen((prev) => !prev)}
-          style={styles.settingsToggle}
+          onPress={() => setThemeMenuOpen(open => !open)}
+          accessibilityRole="button"
+          accessibilityLabel="Theme"
+          accessibilityState={{ expanded: themeMenuOpen }}
+          style={[styles.navButton, styles.themeToggle]}
         >
-          <View style={styles.navIconContainer}>
-            <NavIcon kind={theme === 'light' ? 'sun' : 'moon'} color={tokens.onPrimary} size={20} />
-          </View>
+          <Icon
+            kind={theme === 'light' ? 'sun' : 'moon'}
+            color={tokens.onPrimary}
+            size={20}
+          />
         </Pressable>
       </View>
 
-      {settingsMenuOpen && (
-        <View style={styles.settingsDropdownWrapper} pointerEvents="box-none">
-          <View style={styles.settingsDropdownPointer} />
-          <View style={styles.settingsDropdown} pointerEvents="box-none">
-            <SettingsScreen compact />
+      {themeMenuOpen && (
+        <>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={closeThemeMenu}
+            accessibilityRole="button"
+            accessibilityLabel="Close theme menu"
+          />
+          <View
+            style={[
+              styles.dropdownWrapper,
+              {
+                bottom: tabBarHeight + DROPDOWN_GAP,
+                right: EDGE_OFFSET + insets.right,
+              },
+            ]}
+            pointerEvents="box-none"
+          >
+            <View style={styles.dropdownPointer} />
+            <View style={styles.dropdown}>
+              <ThemeMenu />
+            </View>
           </View>
-        </View>
+        </>
       )}
 
-      {modal?.type === 'habitForm' && (
-        <View style={styles.modalOverlay}>
-          <HabitFormScreen existingHabit={modal.existingHabit} onDone={closeModal} />
-          <Pressable onPress={closeModal} style={styles.modalClose}>
-            <Svg width={26} height={26} viewBox="0 0 24 24" fill="none">
-              <Circle cx="12" cy="12" r="10" stroke={tokens.accent} strokeWidth={2} />
-              <Path d="M8 8L16 16M16 8L8 16" stroke={tokens.accent} strokeWidth={2.2} strokeLinecap="round" />
-            </Svg>
+      {formModal && (
+        <View
+          style={[
+            styles.modalOverlay,
+            horizontalInsets,
+            {
+              paddingTop: insets.top + MODAL_TOP_GAP,
+              paddingBottom: insets.bottom,
+            },
+          ]}
+        >
+          <HabitFormScreen
+            key={formModal.existingHabit?.id ?? 'new'}
+            existingHabit={formModal.existingHabit}
+            onDone={closeForm}
+          />
+          <Pressable
+            onPress={closeForm}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            style={[
+              styles.modalClose,
+              {
+                top: insets.top + MODAL_TOP_GAP + MODAL_CLOSE_OFFSET,
+                right: EDGE_OFFSET + insets.right,
+              },
+            ]}
+          >
+            <Icon kind="close" color={tokens.accent} size={26} />
           </Pressable>
         </View>
       )}
-
     </View>
   );
 }
 
-type ModalState =
-  | { type: 'habitForm'; existingHabit?: Habit }
-  | null;
-
-function makeStyles(tokens: ReturnType<typeof getTokens>) {
+function makeStyles(tokens: Tokens) {
   return StyleSheet.create({
     root: {
       flex: 1,
       backgroundColor: tokens.background,
-      paddingBottom: 40,
-      paddingTop: 20,
     },
-    screenArea: { flex: 1, paddingTop: 6 },
+    screenArea: { flex: 1 },
     tabBar: {
       flexDirection: 'row',
       justifyContent: 'center',
@@ -179,60 +229,31 @@ function makeStyles(tokens: ReturnType<typeof getTokens>) {
       borderTopColor: tokens.border,
       backgroundColor: tokens.surface,
       paddingTop: tokens.space2,
-      paddingBottom: tokens.space3 + 4,
     },
-    tabItem: {
+    navButton: {
       alignItems: 'center',
       justifyContent: 'center',
       width: 60,
       height: 60,
-      borderRadius: 50,
+      borderRadius: 30,
     },
-    navIconContainer: {
-      width: '100%',
-      height: '100%',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: 0,
-    },
-    activeTabItem: {
+    activeNavButton: {
       backgroundColor: tokens.background,
       borderWidth: 1,
       borderColor: tokens.border,
     },
-    settingsToggle: {
-      alignItems: 'center',
-      justifyContent: 'center',
-      width: 60,
-      height: 60,
-      borderRadius: 50,
+    themeToggle: {
       backgroundColor: tokens.primary,
       borderWidth: 1,
       borderColor: tokens.primary,
-      padding: 0,
     },
-    settingsDropdown: {
-      backgroundColor: tokens.surface,
-      borderRadius: tokens.radiusLg,
-      borderWidth: 1,
-      borderColor: tokens.border,
-      padding: tokens.space3,
-      shadowColor: '#000',
-      shadowOpacity: 0.08,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 6,
-    },
-    settingsDropdownWrapper: {
+    dropdownWrapper: {
       position: 'absolute',
-      right: 18,
-      bottom: 140,
       alignItems: 'flex-end',
     },
-    settingsDropdownPointer: {
+    dropdownPointer: {
       width: 0,
       height: 0,
-      backgroundColor: 'transparent',
       borderLeftWidth: 8,
       borderRightWidth: 8,
       borderTopWidth: 10,
@@ -242,24 +263,32 @@ function makeStyles(tokens: ReturnType<typeof getTokens>) {
       marginBottom: -1,
       marginRight: 12,
     },
+    dropdown: {
+      backgroundColor: tokens.surface,
+      borderRadius: tokens.radiusLg,
+      borderWidth: 1,
+      borderColor: tokens.border,
+      padding: tokens.space3,
+      shadowColor: tokens.shadow,
+      shadowOpacity: 0.08,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 6,
+    },
     modalOverlay: {
       position: 'absolute',
       top: 0,
-      left: 0,
       right: 0,
       bottom: 0,
+      left: 0,
       backgroundColor: tokens.background,
-      paddingTop: 25,
     },
     modalClose: {
       position: 'absolute',
-      top: 45,
-      right: 18,
       width: 32,
       height: 32,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    modalCloseLabel: { fontSize: 14, color: tokens.accent },
   });
 }

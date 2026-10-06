@@ -1,265 +1,422 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TextInput, Pressable } from 'react-native';
+import { useRef, useState } from 'react';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useHabits } from '../context/HabitContext';
-import { useSettings } from '../context/SettingsContext';
-import { getTokens } from '../theme/tokens';
-import { Habit, RepeatMode, DayOfWeek, HabitTarget } from '../storage/types';
+import { useThemedStyles, useTokens } from '../hooks/useTheme';
+import { dateToTime, formatClockTime, timeToDate } from '../logic/time';
+import {
+  draftFromHabit,
+  parseTargetAmount,
+  validateHabitDraft,
+  type HabitDraft,
+} from '../logic/validation';
+import type { Tokens } from '../theme/tokens';
+import type {
+  DayOfWeek,
+  Habit,
+  HabitSchedule,
+  HabitTarget,
+  RepeatMode,
+} from '../storage/types';
+
+type DraftErrors = ReturnType<typeof validateHabitDraft>;
+type ErrorField = keyof DraftErrors;
+type TimeField = 'startTime' | 'endTime';
 
 const REPEAT_MODES: RepeatMode[] = ['daily', 'weekly', 'custom'];
-const DAY_LABELS: { label: string; value: DayOfWeek }[] = [
-  { label: 'Sun', value: 0 },
-  { label: 'Mon', value: 1 },
-  { label: 'Tue', value: 2 },
-  { label: 'Wed', value: 3 },
-  { label: 'Thu', value: 4 },
-  { label: 'Fri', value: 5 },
-  { label: 'Sat', value: 6 },
+
+const DAYS: { label: string; name: string; value: DayOfWeek }[] = [
+  { label: 'Sun', name: 'Sunday', value: 0 },
+  { label: 'Mon', name: 'Monday', value: 1 },
+  { label: 'Tue', name: 'Tuesday', value: 2 },
+  { label: 'Wed', name: 'Wednesday', value: 3 },
+  { label: 'Thu', name: 'Thursday', value: 4 },
+  { label: 'Fri', name: 'Friday', value: 5 },
+  { label: 'Sat', name: 'Saturday', value: 6 },
 ];
 
-function padTime(value: number): string {
-  return value.toString().padStart(2, '0');
-}
+const EMPTY_DRAFT: HabitDraft = {
+  title: '',
+  notes: '',
+  repeat: 'daily',
+  days: [],
+  startTime: '09:00',
+  endTime: '17:00',
+  targetUnit: '',
+  targetAmount: '',
+};
 
-function parseTimeString(value: string): Date {
-  if (!value || !/^\d{2}:\d{2}$/.test(value)) {
-    return new Date(2000, 0, 1, 9, 0);
-  }
-
-  const [hours, minutes] = value.split(':').map(Number);
-  const next = new Date(2000, 0, 1, hours, minutes);
-  return Number.isNaN(next.getTime()) ? new Date(2000, 0, 1, 9, 0) : next;
-}
-
-function formatTimeString(date: Date): string {
-  return `${padTime(date.getHours())}:${padTime(date.getMinutes())}`;
-}
-
-/** "HH:mm" (24h, as stored) -> "h:mm AM/PM" for display. */
-function formatDisplayTime(value: string): string {
-  if (!value || !/^\d{2}:\d{2}$/.test(value)) {
-    return value;
-  }
-  const [hoursStr, minutesStr] = value.split(':');
-  const hours = Number(hoursStr);
-  const period = hours >= 12 ? 'PM' : 'AM';
-  const displayHour = hours % 12 === 0 ? 12 : hours % 12;
-  return `${displayHour}:${minutesStr} ${period}`;
-}
+/** The validation error each draft field feeds, so editing a field clears its message. */
+const ERROR_FOR_FIELD: Partial<Record<keyof HabitDraft, ErrorField>> = {
+  title: 'title',
+  repeat: 'days',
+  days: 'days',
+  startTime: 'time',
+  endTime: 'time',
+  targetUnit: 'target',
+  targetAmount: 'target',
+};
 
 function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export interface HabitFormProps {
-  existingHabit?: Habit;
-  onDone?: () => void;
+function buildTarget(draft: HabitDraft): HabitTarget | undefined {
+  const unit = draft.targetUnit.trim();
+  const amount = parseTargetAmount(draft.targetAmount);
+  // validateHabitDraft guarantees unit and amount are both present or both blank.
+  return unit && amount !== null ? { unit, amount } : undefined;
 }
+
+function buildSchedule(draft: HabitDraft): HabitSchedule {
+  return {
+    repeat: draft.repeat,
+    days: draft.repeat === 'custom' ? draft.days : [],
+    startTime: draft.startTime,
+    endTime: draft.endTime,
+  };
+}
+
+type HabitFormProps = {
+  existingHabit?: Habit;
+  onDone: () => void;
+};
 
 export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
   const { addHabit, updateHabit } = useHabits();
-  const { theme } = useSettings();
-  const tokens = getTokens(theme);
-  const styles = makeStyles(tokens);
+  const tokens = useTokens();
+  const styles = useThemedStyles(makeStyles);
 
-  const [title, setTitle] = useState(existingHabit?.title ?? '');
-  const [notes, setNotes] = useState(existingHabit?.notes ?? '');
-  const [repeat, setRepeat] = useState<RepeatMode>(existingHabit?.schedule.repeat ?? 'daily');
-  const [days, setDays] = useState<DayOfWeek[]>(existingHabit?.schedule.days ?? []);
-  const [startTime, setStartTime] = useState(existingHabit?.schedule.startTime ?? '09:00');
-  const [endTime, setEndTime] = useState(existingHabit?.schedule.endTime ?? '17:00');
-  const [countUnit, setCountUnit] = useState(existingHabit?.target?.unit ?? '');
-  const [countAmount, setCountAmount] = useState(
-    existingHabit?.target?.amount !== undefined ? String(existingHabit.target.amount) : ''
+  const [draft, setDraft] = useState<HabitDraft>(() =>
+    existingHabit ? draftFromHabit(existingHabit) : EMPTY_DRAFT,
   );
-  const [timePickerTarget, setTimePickerTarget] = useState<'start' | 'end' | null>(null);
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [errors, setErrors] = useState<DraftErrors>({});
+  const [pickerField, setPickerField] = useState<TimeField | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  // A ref, unlike state, also blocks a second tap that lands before the re-render.
+  const submittingRef = useRef(false);
 
-  const toggleDay = useCallback((day: DayOfWeek) => {
-    setDays((prev) =>
-      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
-    );
-  }, []);
-
-  const openTimePicker = useCallback((target: 'start' | 'end') => {
-    setTimePickerTarget(target);
-    setShowTimePicker(true);
-  }, []);
-
-  const handleTimeChange = useCallback((event: unknown, selectedDate?: Date) => {
-    if (event) {
-      setShowTimePicker(false);
+  function updateField<K extends keyof HabitDraft>(
+    field: K,
+    value: HabitDraft[K],
+  ) {
+    setDraft(prev => ({ ...prev, [field]: value }));
+    const errorField = ERROR_FOR_FIELD[field];
+    if (errorField) {
+      setErrors(prev => ({ ...prev, [errorField]: undefined }));
     }
-    if (!selectedDate || !timePickerTarget) {
+  }
+
+  function toggleDay(day: DayOfWeek) {
+    // Functional update so two quick taps before a re-render both register.
+    setDraft(prev => ({
+      ...prev,
+      days: prev.days.includes(day)
+        ? prev.days.filter(d => d !== day)
+        : [...prev.days, day].sort((a, b) => a - b),
+    }));
+    setErrors(prev => ({ ...prev, days: undefined }));
+  }
+
+  // The Android dialog closes itself on confirm or cancel; unmount it to match.
+  function handleTimeConfirm(_event: unknown, date: Date) {
+    const field = pickerField;
+    setPickerField(null);
+    if (field) {
+      updateField(field, dateToTime(date));
+    }
+  }
+
+  function handleTimeDismiss() {
+    setPickerField(null);
+  }
+
+  async function handleSubmit() {
+    if (submittingRef.current) {
+      return;
+    }
+    const validationErrors = validateHabitDraft(draft);
+    setErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) {
       return;
     }
 
-    const formatted = formatTimeString(selectedDate);
-    if (timePickerTarget === 'start') {
-      setStartTime(formatted);
-    } else {
-      setEndTime(formatted);
-    }
-    setTimePickerTarget(null);
-  }, [timePickerTarget]);
+    const title = draft.title.trim();
+    const notes = draft.notes;
+    const schedule = buildSchedule(draft);
+    const target = buildTarget(draft);
 
-  const handleSubmit = useCallback(async () => {
-    const schedule = {
-      repeat,
-      days: repeat === 'custom' ? days : [],
-      startTime,
-      endTime,
-    };
-
-    const trimmedUnit = countUnit.trim();
-    const parsedAmount = Number(countAmount);
-    const target: HabitTarget | undefined =
-      trimmedUnit && countAmount.trim() && Number.isFinite(parsedAmount) && parsedAmount > 0
-        ? { unit: trimmedUnit, amount: parsedAmount }
-        : undefined;
-
-    if (existingHabit) {
-      await updateHabit({ ...existingHabit, title, notes, schedule, target });
-      onDone?.();
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    try {
+      if (existingHabit) {
+        await updateHabit({ ...existingHabit, title, notes, schedule, target });
+      } else {
+        await addHabit({
+          id: makeId(),
+          title,
+          notes,
+          schedule,
+          target,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    } catch {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+      Alert.alert(
+        'Could not save habit',
+        'Something went wrong while saving. Please try again.',
+      );
       return;
     }
-
-    const newHabit: Habit = {
-      id: makeId(),
-      title,
-      notes,
-      schedule,
-      target,
-      createdAt: new Date().toISOString(),
-    };
-
-    await addHabit(newHabit);
-    onDone?.();
-  }, [existingHabit, title, notes, repeat, days, startTime, endTime, countUnit, countAmount, addHabit, updateHabit, onDone]);
-
-  const timePickerValue = timePickerTarget === 'start' ? parseTimeString(startTime) : parseTimeString(endTime);
+    onDone();
+  }
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={styles.container}
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={styles.label}>Title</Text>
       <TextInput
-        style={styles.input}
-        value={title}
-        onChangeText={setTitle}
+        style={[styles.input, errors.title && styles.inputInvalid]}
+        value={draft.title}
+        onChangeText={text => updateField('title', text)}
         placeholder="Habit title"
         placeholderTextColor={tokens.textMuted}
+        accessibilityLabel="Title"
       />
+      <FieldError message={errors.title} />
 
       <Text style={styles.label}>Notes</Text>
       <TextInput
         style={styles.input}
-        value={notes}
-        onChangeText={setNotes}
+        value={draft.notes}
+        onChangeText={text => updateField('notes', text)}
         placeholder="Optional notes"
         placeholderTextColor={tokens.textMuted}
+        accessibilityLabel="Notes"
       />
 
       <Text style={styles.label}>Track a target amount (optional)</Text>
-      <View style={styles.countRow}>
-        <View style={styles.countUnitInput}>
-          <Text style={styles.countFieldLabel}>What are you tracking?</Text>
+      <View style={styles.targetRow}>
+        <View style={styles.targetUnit}>
+          <Text style={styles.targetFieldLabel}>What are you tracking?</Text>
           <TextInput
-            style={styles.input}
-            value={countUnit}
-            onChangeText={setCountUnit}
+            style={[styles.input, errors.target && styles.inputInvalid]}
+            value={draft.targetUnit}
+            onChangeText={text => updateField('targetUnit', text)}
             placeholder="e.g. pages, glasses, minutes"
             placeholderTextColor={tokens.textMuted}
+            accessibilityLabel="What are you tracking?"
           />
         </View>
-        <View style={styles.countAmountInput}>
-          <Text style={styles.countFieldLabel}>Target</Text>
+        <View style={styles.targetAmount}>
+          <Text style={styles.targetFieldLabel}>Target</Text>
           <TextInput
-            style={styles.input}
-            value={countAmount}
-            onChangeText={setCountAmount}
+            style={[styles.input, errors.target && styles.inputInvalid]}
+            value={draft.targetAmount}
+            onChangeText={text => updateField('targetAmount', text)}
             placeholder="e.g. 20"
             placeholderTextColor={tokens.textMuted}
-            keyboardType="numeric"
+            keyboardType="decimal-pad"
+            accessibilityLabel="Target amount"
           />
         </View>
       </View>
+      <FieldError message={errors.target} />
 
       <Text style={styles.label}>Repeat</Text>
-      <View style={styles.segmented}>
-        {REPEAT_MODES.map((mode) => (
-          <Pressable
-            key={mode}
-            onPress={() => setRepeat(mode)}
-            style={[styles.segment, repeat === mode && { backgroundColor: tokens.primary }]}
-          >
-            <Text style={[styles.segmentLabel, repeat === mode && { color: tokens.onPrimary }]}>
-              {mode}
-            </Text>
-          </Pressable>
-        ))}
+      <View style={styles.segmented} accessibilityRole="radiogroup">
+        {REPEAT_MODES.map(mode => {
+          const selected = draft.repeat === mode;
+          return (
+            <Pressable
+              key={mode}
+              onPress={() => updateField('repeat', mode)}
+              style={[styles.segment, selected && styles.segmentSelected]}
+              accessibilityRole="radio"
+              accessibilityLabel={`Repeat ${mode}`}
+              accessibilityState={{ checked: selected }}
+            >
+              <Text
+                style={[
+                  styles.segmentLabel,
+                  selected && styles.segmentLabelSelected,
+                ]}
+              >
+                {mode}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
 
-      {repeat === 'custom' && (
-        <View style={styles.dayRow}>
-          {DAY_LABELS.map(({ label, value }) => (
-            <Pressable
-              key={value}
-              onPress={() => toggleDay(value)}
-              style={[styles.dayChip, days.includes(value) && { backgroundColor: tokens.accent }]}
-            >
-              <Text style={styles.dayChipLabel}>{label}</Text>
-            </Pressable>
-          ))}
-        </View>
+      {draft.repeat === 'custom' && (
+        <>
+          <View style={styles.dayRow}>
+            {DAYS.map(({ label, name, value }) => {
+              const selected = draft.days.includes(value);
+              return (
+                <Pressable
+                  key={value}
+                  onPress={() => toggleDay(value)}
+                  style={[styles.dayChip, selected && styles.dayChipSelected]}
+                  accessibilityRole="checkbox"
+                  accessibilityLabel={name}
+                  accessibilityState={{ checked: selected }}
+                >
+                  <Text style={styles.dayChipLabel}>{label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <FieldError message={errors.days} />
+        </>
       )}
 
       <Text style={styles.label}>Start time</Text>
-      <Pressable style={styles.timePickerButton} onPress={() => openTimePicker('start')}>
-        <Text style={styles.timePickerText}>{formatDisplayTime(startTime)}</Text>
+      <Pressable
+        style={[styles.timeButton, errors.time && styles.inputInvalid]}
+        onPress={() => setPickerField('startTime')}
+        accessibilityRole="button"
+        accessibilityLabel={`Start time, ${formatClockTime(draft.startTime)}`}
+        accessibilityHint="Opens a time picker"
+      >
+        <Text style={styles.timeText}>{formatClockTime(draft.startTime)}</Text>
       </Pressable>
 
       <Text style={styles.label}>End time</Text>
-      <Pressable style={styles.timePickerButton} onPress={() => openTimePicker('end')}>
-        <Text style={styles.timePickerText}>{formatDisplayTime(endTime)}</Text>
+      <Pressable
+        style={[styles.timeButton, errors.time && styles.inputInvalid]}
+        onPress={() => setPickerField('endTime')}
+        accessibilityRole="button"
+        accessibilityLabel={`End time, ${formatClockTime(draft.endTime)}`}
+        accessibilityHint="Opens a time picker"
+      >
+        <Text style={styles.timeText}>{formatClockTime(draft.endTime)}</Text>
       </Pressable>
+      <FieldError message={errors.time} />
 
-      {showTimePicker && timePickerTarget && (
+      {pickerField && (
         <DateTimePicker
-          value={timePickerValue}
+          value={timeToDate(draft[pickerField])}
           mode="time"
           display="spinner"
           is24Hour={false}
-          onChange={handleTimeChange}
+          onValueChange={handleTimeConfirm}
+          onDismiss={handleTimeDismiss}
         />
       )}
 
       <Pressable
-        style={styles.submitButton}
+        style={[styles.submitButton, isSubmitting && styles.submitDisabled]}
         onPress={handleSubmit}
+        disabled={isSubmitting}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: isSubmitting, busy: isSubmitting }}
       >
-        <Text style={styles.submitText}>{existingHabit ? 'Save' : 'Add habit'}</Text>
+        <Text style={styles.submitText}>
+          {existingHabit ? 'Save' : 'Add habit'}
+        </Text>
       </Pressable>
-    </View>
+    </ScrollView>
   );
 }
 
-function makeStyles(tokens: ReturnType<typeof getTokens>) {
+function FieldError({ message }: { message?: string }) {
+  const styles = useThemedStyles(makeStyles);
+  if (!message) {
+    return null;
+  }
+  return (
+    <Text style={styles.errorText} accessibilityLiveRegion="polite">
+      {message}
+    </Text>
+  );
+}
+
+function makeStyles(tokens: Tokens) {
   return StyleSheet.create({
-    container: { backgroundColor: tokens.background, paddingHorizontal: tokens.space6, paddingVertical: tokens.space6 },
-    label: { fontSize: 13, color: tokens.textMuted, marginTop: tokens.space4, marginBottom: tokens.space2 },
-    input: { backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, borderRadius: tokens.radiusMd, padding: tokens.space3, color: tokens.text },
-    countRow: { flexDirection: 'row', gap: tokens.space2 },
-    countUnitInput: { flex: 2 },
-    countAmountInput: { flex: 1 },
-    countFieldLabel: { fontSize: 12, color: tokens.textMuted, marginBottom: tokens.space1 },
+    scroll: { flex: 1, backgroundColor: tokens.background },
+    container: {
+      paddingHorizontal: tokens.space6,
+      paddingVertical: tokens.space6,
+    },
+    label: {
+      fontSize: 13,
+      color: tokens.textMuted,
+      marginTop: tokens.space4,
+      marginBottom: tokens.space2,
+    },
+    input: {
+      backgroundColor: tokens.surface,
+      borderWidth: 1,
+      borderColor: tokens.border,
+      borderRadius: tokens.radiusMd,
+      padding: tokens.space3,
+      color: tokens.text,
+    },
+    inputInvalid: { borderColor: tokens.accent },
+    errorText: {
+      fontSize: 12,
+      color: tokens.text,
+      marginTop: tokens.space1,
+    },
+    targetRow: { flexDirection: 'row', gap: tokens.space2 },
+    targetUnit: { flex: 2 },
+    targetAmount: { flex: 1 },
+    targetFieldLabel: {
+      fontSize: 12,
+      color: tokens.textMuted,
+      marginBottom: tokens.space1,
+    },
     segmented: { flexDirection: 'row', gap: tokens.space2 },
-    segment: { flex: 1, alignItems: 'center', paddingVertical: tokens.space3, borderRadius: tokens.radiusMd, backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border },
+    segment: {
+      flex: 1,
+      alignItems: 'center',
+      paddingVertical: tokens.space3,
+      borderRadius: tokens.radiusMd,
+      backgroundColor: tokens.surface,
+      borderWidth: 1,
+      borderColor: tokens.border,
+    },
+    segmentSelected: { backgroundColor: tokens.primary },
     segmentLabel: { fontSize: 13, color: tokens.text },
-    dayRow: { flexDirection: 'row', flexWrap: 'wrap', gap: tokens.space2, marginTop: tokens.space2 },
-    dayChip: { borderWidth: 1, borderColor: tokens.border, borderRadius: tokens.radiusMd, paddingHorizontal: tokens.space2, paddingVertical: tokens.space2 },
+    segmentLabelSelected: { color: tokens.onPrimary },
+    dayRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: tokens.space2,
+      marginTop: tokens.space2,
+    },
+    dayChip: {
+      borderWidth: 1,
+      borderColor: tokens.border,
+      borderRadius: tokens.radiusMd,
+      paddingHorizontal: tokens.space2,
+      paddingVertical: tokens.space2,
+    },
+    dayChipSelected: { backgroundColor: tokens.accent },
     dayChipLabel: { fontSize: 12, color: tokens.text },
-    timePickerButton: { backgroundColor: tokens.surface, borderWidth: 1, borderColor: tokens.border, borderRadius: tokens.radiusMd, padding: tokens.space3 },
-    timePickerText: { color: tokens.text, fontSize: 15 },
+    timeButton: {
+      backgroundColor: tokens.surface,
+      borderWidth: 1,
+      borderColor: tokens.border,
+      borderRadius: tokens.radiusMd,
+      padding: tokens.space3,
+    },
+    timeText: { color: tokens.text, fontSize: 15 },
     submitButton: {
       marginTop: tokens.space6,
       backgroundColor: tokens.primary,
@@ -267,6 +424,7 @@ function makeStyles(tokens: ReturnType<typeof getTokens>) {
       paddingVertical: tokens.space3,
       alignItems: 'center',
     },
+    submitDisabled: { opacity: 0.6 },
     submitText: { color: tokens.onPrimary, fontSize: 15, fontWeight: '600' },
   });
 }

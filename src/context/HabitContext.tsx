@@ -1,134 +1,142 @@
-import React, {
+import {
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
-  ReactNode,
+  type ReactNode,
 } from 'react';
+import * as transitions from '../logic/habitState';
+import type { HabitData } from '../logic/habitState';
+import { createSerialQueue } from '../logic/serialQueue';
 import {
-  getHabits,
-  setHabits as persistHabits,
   getCompletions,
-  setCompletions as persistCompletions,
+  getHabits,
+  setCompletions,
+  setHabits,
 } from '../storage/storage';
-import { Habit, HabitCompletion } from '../storage/types';
+import type { Habit, HabitCompletion } from '../storage/types';
 
 interface HabitContextValue {
   habits: Habit[];
+  completions: HabitCompletion[];
   isLoading: boolean;
   addHabit: (habit: Habit) => Promise<void>;
   updateHabit: (habit: Habit) => Promise<void>;
   deleteHabit: (id: string) => Promise<void>;
-  completions: HabitCompletion[];
   recordCompletion: (habitId: string, date: string) => Promise<void>;
 }
 
+const EMPTY_DATA: HabitData = { habits: [], completions: [] };
+
 const HabitContext = createContext<HabitContextValue | undefined>(undefined);
 
-interface HabitProviderProps {
-  children: ReactNode;
-}
-
-export function HabitProvider({ children }: HabitProviderProps) {
-  const [habits, setHabitsState] = useState<Habit[]>([]);
-  const [completions, setCompletionsState] = useState<HabitCompletion[]>([]);
+export function HabitProvider({ children }: { children: ReactNode }) {
+  const [data, setData] = useState<HabitData>(EMPTY_DATA);
   const [isLoading, setIsLoading] = useState(true);
-
-  const habitsRef = useRef<Habit[]>([]);
-  const completionsRef = useRef<HabitCompletion[]>([]);
-
-  const commitHabits = useCallback((next: Habit[]) => {
-    habitsRef.current = next;
-    setHabitsState(next);
-  }, []);
-  const commitCompletions = useCallback((next: HabitCompletion[]) => {
-    completionsRef.current = next;
-    setCompletionsState(next);
-  }, []);
-
+  // Mirror of `data` read by queued tasks, so each sees its predecessor's result.
+  const dataRef = useRef(data);
+  const [enqueue] = useState(createSerialQueue);
   const hydrationRef = useRef<Promise<void> | null>(null);
-  const ensureHydrated = useCallback((): Promise<void> => {
-    if (!hydrationRef.current) {
-      hydrationRef.current = (async () => {
-        const [storedHabits, storedCompletions] = await Promise.all([
+
+  const commit = useCallback((next: HabitData) => {
+    dataRef.current = next;
+    setData(next);
+  }, []);
+
+  /** Queues the one-time load first; idempotent, so StrictMode and early callers are safe. */
+  const hydrate = useCallback(() => {
+    hydrationRef.current ??= enqueue(async () => {
+      try {
+        const [habits, completions] = await Promise.all([
           getHabits(),
           getCompletions(),
         ]);
-        commitHabits(storedHabits);
-        commitCompletions(storedCompletions);
+        commit({ habits, completions });
+      } catch (err) {
+        console.warn('[habits] hydration failed, starting empty', err);
+      } finally {
         setIsLoading(false);
-      })();
-    }
+      }
+    });
     return hydrationRef.current;
-  }, [commitHabits, commitCompletions]);
+  }, [enqueue, commit]);
 
   useEffect(() => {
-    ensureHydrated();
-  }, [ensureHydrated]);
+    hydrate();
+  }, [hydrate]);
+
+  /**
+   * Runs a pure transition behind hydration and every earlier mutation, persists
+   * only the domains it changed, then commits. A failed write rejects and commits
+   * nothing. Habits are written first, so a failure in between leaves orphaned
+   * completions rather than a surviving habit with its history erased.
+   */
+  const mutate = useCallback(
+    (transition: (current: HabitData) => HabitData): Promise<void> => {
+      hydrate();
+      return enqueue(async () => {
+        const current = dataRef.current;
+        const next = transition(current);
+        if (next === current) {
+          return;
+        }
+        if (next.habits !== current.habits) {
+          await setHabits(next.habits);
+        }
+        if (next.completions !== current.completions) {
+          await setCompletions(next.completions);
+        }
+        commit(next);
+      });
+    },
+    [hydrate, enqueue, commit],
+  );
 
   const addHabit = useCallback(
-    async (habit: Habit): Promise<void> => {
-      await ensureHydrated();
-      const next = [...habitsRef.current, habit];
-      await persistHabits(next);
-      commitHabits(next);
-    },
-    [ensureHydrated, commitHabits]
+    (habit: Habit) => mutate(d => transitions.addHabit(d, habit)),
+    [mutate],
   );
 
   const updateHabit = useCallback(
-    async (habit: Habit) => {
-      await ensureHydrated();
-      const next = habitsRef.current.map((h) => (h.id === habit.id ? habit : h));
-      await persistHabits(next);
-      commitHabits(next);
-    },
-    [ensureHydrated, commitHabits]
+    (habit: Habit) => mutate(d => transitions.updateHabit(d, habit)),
+    [mutate],
   );
 
   const deleteHabit = useCallback(
-    async (id: string) => {
-      await ensureHydrated();
-      const next = habitsRef.current.filter((h) => h.id !== id);
-      await persistHabits(next);
-      commitHabits(next);
-    },
-    [ensureHydrated, commitHabits]
+    (id: string) => mutate(d => transitions.deleteHabit(d, id)),
+    [mutate],
   );
 
   const recordCompletion = useCallback(
-    async (habitId: string, date: string) => {
-      await ensureHydrated();
-      const alreadyRecorded = completionsRef.current.some(
-        (c) => c.habitId === habitId && c.date === date
-      );
-      if (alreadyRecorded) return; // idempotent — no duplicate record
-      const next = [
-        ...completionsRef.current,
-        { habitId, date, completedAt: new Date().toISOString() },
-      ];
-      await persistCompletions(next);
-      commitCompletions(next);
+    (habitId: string, date: string) => {
+      const completion: HabitCompletion = {
+        habitId,
+        date,
+        completedAt: new Date().toISOString(),
+      };
+      return mutate(d => transitions.recordCompletion(d, completion));
     },
-    [ensureHydrated, commitCompletions]
+    [mutate],
+  );
+
+  const value: HabitContextValue = useMemo(
+    () => ({
+      habits: data.habits,
+      completions: data.completions,
+      isLoading,
+      addHabit,
+      updateHabit,
+      deleteHabit,
+      recordCompletion,
+    }),
+    [data, isLoading, addHabit, updateHabit, deleteHabit, recordCompletion],
   );
 
   return (
-    <HabitContext.Provider
-      value={{
-        habits,
-        isLoading,
-        addHabit,
-        updateHabit,
-        deleteHabit,
-        completions,
-        recordCompletion,
-      }}
-    >
-      {children}
-    </HabitContext.Provider>
+    <HabitContext.Provider value={value}>{children}</HabitContext.Provider>
   );
 }
 

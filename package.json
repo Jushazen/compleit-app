@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "android": "expo run:android",
-    "ios": "expo run:ios",
+    "run-android": "react-native run-android",
+    "start-rn": "react-native start",
     "lint": "eslint .",
     "start": "expo start"
   },
@@ -24,8 +25,8 @@
     "@babel/runtime": "^7.25.0",
     "@react-native-community/cli": "20.2.0",
     "@react-native-community/cli-platform-android": "20.2.0",
-    "@react-native-community/cli-platform-ios": "20.2.0",
     "@react-native/eslint-config": "0.86.0",
+    "@react-native/metro-config": "^0.86.3",
     "@react-native/typescript-config": "0.86.0",
     "@types/node": "^20.14.0",
     "@types/react": "~19.2.4",

@@ -1,8 +1,4 @@
-export type StorageDomain =
-  | 'habits'
-  | 'settings'
-  | 'completions';
-
+export type StorageDomain = 'habits' | 'settings' | 'completions';
 
 const CURRENT_VERSION: Record<StorageDomain, number> = {
   habits: 1,

@@ -1,10 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { storageKey, currentVersion, StorageDomain } from './keys';
-import {
-  Habit,
-  Settings,
-  HabitCompletion,
-} from './types';
+import { currentVersion, StorageDomain, storageKey } from './keys';
+import { Habit, HabitCompletion, Settings } from './types';
 
 interface Envelope<T> {
   version: number;
@@ -21,9 +17,10 @@ function isEnvelope(value: unknown): value is Envelope<unknown> {
   );
 }
 
-export async function readDomain<T>(
+/** Reads a domain; any failure (I/O, corrupt JSON, version mismatch) yields the default. */
+async function readDomain<T>(
   domain: StorageDomain,
-  defaultValue: T
+  defaultValue: T,
 ): Promise<T> {
   let raw: string | null;
   try {
@@ -43,23 +40,25 @@ export async function readDomain<T>(
   } catch (err) {
     console.warn(
       `[storage] corrupt JSON for "${domain}", falling back to default`,
-      err
+      err,
     );
     return defaultValue;
   }
 
   if (!isEnvelope(parsed)) {
     console.warn(
-      `[storage] "${domain}" value is not a recognizable envelope, falling back to default`
+      `[storage] "${domain}" value is not a recognizable envelope, falling back to default`,
     );
     return defaultValue;
   }
 
   if (parsed.version !== currentVersion(domain)) {
     console.warn(
-      `[storage] "${domain}" stored version ${parsed.version} does not match current ${currentVersion(
-        domain
-      )}, falling back to default`
+      `[storage] "${domain}" stored version ${
+        parsed.version
+      } does not match current ${currentVersion(
+        domain,
+      )}, falling back to default`,
     );
     return defaultValue;
   }
@@ -67,41 +66,43 @@ export async function readDomain<T>(
   return parsed.data as T;
 }
 
-export async function writeDomain<T>(
-  domain: StorageDomain,
-  value: T
-): Promise<void> {
-  const envelope: Envelope<T> = { version: currentVersion(domain), data: value };
+async function writeDomain<T>(domain: StorageDomain, value: T): Promise<void> {
+  const envelope: Envelope<T> = {
+    version: currentVersion(domain),
+    data: value,
+  };
   await AsyncStorage.setItem(storageKey(domain), JSON.stringify(envelope));
 }
 
-export const DEFAULT_SETTINGS: Settings = {
-  theme: 'light',
-  heatmapPalette: 'default',
-};
+export const DEFAULT_SETTINGS: Settings = { theme: 'light' };
 
 export async function getHabits(): Promise<Habit[]> {
-  const value = await readDomain<Habit[]>('habits', []);
+  const value = await readDomain<unknown>('habits', []);
   return Array.isArray(value) ? value : [];
 }
+
 export function setHabits(habits: Habit[]): Promise<void> {
   return writeDomain('habits', habits);
 }
 
 export async function getSettings(): Promise<Settings> {
-  const value = await readDomain<Settings | null>('settings', DEFAULT_SETTINGS);
-  return value ?? DEFAULT_SETTINGS;
+  const value = await readDomain<unknown>('settings', null);
+  const theme = (value as { theme?: unknown } | null)?.theme;
+  return {
+    ...DEFAULT_SETTINGS,
+    ...(theme === 'light' || theme === 'dark' ? { theme } : {}),
+  };
 }
+
 export function setSettings(settings: Settings): Promise<void> {
   return writeDomain('settings', settings);
 }
 
 export async function getCompletions(): Promise<HabitCompletion[]> {
-  const value = await readDomain<HabitCompletion[]>('completions', []);
+  const value = await readDomain<unknown>('completions', []);
   return Array.isArray(value) ? value : [];
 }
-export function setCompletions(
-  completions: HabitCompletion[]
-): Promise<void> {
+
+export function setCompletions(completions: HabitCompletion[]): Promise<void> {
   return writeDomain('completions', completions);
 }

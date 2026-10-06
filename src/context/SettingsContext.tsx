@@ -1,69 +1,79 @@
-import React, {
+import {
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useMemo,
+  useRef,
   useState,
-  ReactNode,
+  type ReactNode,
 } from 'react';
-import { getSettings, setSettings as persistSettings, DEFAULT_SETTINGS } from '../storage/storage';
-import { Settings, ThemeMode } from '../storage/types';
+import { createSerialQueue } from '../logic/serialQueue';
+import { DEFAULT_SETTINGS, getSettings, setSettings } from '../storage/storage';
+import type { Settings, ThemeMode } from '../storage/types';
 
 interface SettingsContextValue {
   theme: ThemeMode;
-  heatmapPalette: string;
   isLoading: boolean;
   setTheme: (theme: ThemeMode) => Promise<void>;
-  setHeatmapPalette: (palette: string) => Promise<void>;
 }
 
 const SettingsContext = createContext<SettingsContextValue | undefined>(
-  undefined
+  undefined,
 );
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettingsState] = useState<Settings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(true);
+  // Queued writes read the latest settings from here, never from a render closure.
+  const settingsRef = useRef(settings);
+  const [enqueue] = useState(createSerialQueue);
+  const hydrationRef = useRef<Promise<void> | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const stored = await getSettings();
-      if (!cancelled) {
-        setSettingsState(stored);
-        setIsLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const persistAndSet = useCallback(async (next: Settings) => {
-    await persistSettings(next);
+  const commit = useCallback((next: Settings) => {
+    settingsRef.current = next;
     setSettingsState(next);
   }, []);
 
+  /** Queues the one-time load ahead of any write, so a late load cannot overwrite the user's choice. */
+  const hydrate = useCallback(() => {
+    hydrationRef.current ??= enqueue(async () => {
+      try {
+        commit(await getSettings());
+      } catch (err) {
+        console.warn('[settings] hydration failed, using defaults', err);
+      } finally {
+        setIsLoading(false);
+      }
+    });
+    return hydrationRef.current;
+  }, [enqueue, commit]);
+
+  useEffect(() => {
+    hydrate();
+  }, [hydrate]);
+
+  // Committed after the write succeeds (not optimistically): the UI never shows
+  // a theme that was not saved, and a failed write rejects for the caller.
   const setTheme = useCallback(
-    (theme: ThemeMode) => persistAndSet({ ...settings, theme }),
-    [settings, persistAndSet]
+    (theme: ThemeMode): Promise<void> => {
+      hydrate();
+      return enqueue(async () => {
+        const next: Settings = { ...settingsRef.current, theme };
+        await setSettings(next);
+        commit(next);
+      });
+    },
+    [hydrate, enqueue, commit],
   );
 
-  const setHeatmapPalette = useCallback(
-    (heatmapPalette: string) => persistAndSet({ ...settings, heatmapPalette }),
-    [settings, persistAndSet]
+  const value: SettingsContextValue = useMemo(
+    () => ({ theme: settings.theme, isLoading, setTheme }),
+    [settings.theme, isLoading, setTheme],
   );
 
   return (
-    <SettingsContext.Provider
-      value={{
-        theme: settings.theme,
-        heatmapPalette: settings.heatmapPalette,
-        isLoading,
-        setTheme,
-        setHeatmapPalette,
-      }}
-    >
+    <SettingsContext.Provider value={value}>
       {children}
     </SettingsContext.Provider>
   );

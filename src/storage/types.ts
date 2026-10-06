@@ -30,7 +30,6 @@ export type ThemeMode = 'light' | 'dark';
 
 export interface Settings {
   theme: ThemeMode;
-  heatmapPalette: string;
 }
 
 export interface HabitCompletion {

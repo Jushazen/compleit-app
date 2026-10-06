@@ -1,193 +1,210 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
+import { useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { Icon } from '../components/icons';
 import { useHabits } from '../context/HabitContext';
-import { useSettings } from '../context/SettingsContext';
-import { getTokens } from '../theme/tokens';
-import { isScheduledOn } from '../logic/isScheduledOn';
-import { calculateStreak } from '../logic/streaks/streak';
+import { useNow } from '../hooks/useNow';
+import { useThemedStyles, useTokens } from '../hooks/useTheme';
+import { groupTodaysHabits, type HabitBucket } from '../logic/buckets';
 import { localDateToString } from '../logic/dateUtils';
-import { Habit } from '../storage/types';
+import { describeSchedule } from '../logic/schedule';
+import { calculateStreak } from '../logic/streak';
+import { formatClockTime } from '../logic/time';
+import type { Habit } from '../storage/types';
+import type { Tokens } from '../theme/tokens';
 
-export function todaysHabits(habits: Habit[], now: Date): Habit[] {
-  const todayStr = localDateToString(now);
-  return habits.filter((h) =>
-    isScheduledOn(h.schedule, todayStr, h.createdAt.slice(0, 10))
-  );
-}
-
-function minutesSinceMidnight(hhmm: string): number {
-  const [hours, minutes] = hhmm.split(':').map(Number);
-  return hours * 60 + minutes;
-}
-
-/** "HH:mm" (24h, as stored) -> "h:mm AM/PM" for display. */
-function formatClockTime(hhmm: string): string {
-  const [hoursStr, minutesStr] = hhmm.split(':');
-  const hours = Number(hoursStr);
-  const period = hours >= 12 ? 'PM' : 'AM';
-  const displayHour = hours % 12 === 0 ? 12 : hours % 12;
-  return `${displayHour}:${minutesStr} ${period}`;
-}
-
-function formatTimeRange(habit: Habit): string {
-  return `${formatClockTime(habit.schedule.startTime)} - ${formatClockTime(habit.schedule.endTime)}`;
-}
-
-function formatTarget(habit: Habit): string | null {
-  return habit.target ? `Target: ${habit.target.amount} ${habit.target.unit}` : null;
-}
-
-type HabitBucket = 'missed' | 'due' | 'upcoming' | 'completed';
-
-/** Which of the day's four sections a habit belongs in, given whether it's already completed and the current time-of-day. */
-function bucketFor(habit: Habit, completed: boolean, currentMinutes: number): HabitBucket {
-  if (completed) return 'completed';
-  if (currentMinutes > minutesSinceMidnight(habit.schedule.endTime)) return 'missed';
-  if (currentMinutes >= minutesSinceMidnight(habit.schedule.startTime)) return 'due';
-  return 'upcoming';
-}
-
-const SECTIONS: { key: HabitBucket; title: string }[] = [
+const SECTIONS: readonly { key: HabitBucket; title: string }[] = [
   { key: 'missed', title: 'Missed' },
   { key: 'due', title: 'Must complete' },
   { key: 'upcoming', title: 'Upcoming' },
   { key: 'completed', title: 'Completed' },
 ];
 
-export interface HomeScreenProps {
-  onAddHabit?: () => void;
+type Styles = ReturnType<typeof makeStyles>;
+
+interface HomeScreenProps {
+  onAddHabit: () => void;
+  onEditHabit: (habit: Habit) => void;
 }
 
-export function HomeScreen({ onAddHabit }: HomeScreenProps) {
-  const { habits, completions, recordCompletion, deleteHabit } = useHabits();
-  const { theme } = useSettings();
-  const tokens = getTokens(theme);
+export function HomeScreen({ onAddHabit, onEditHabit }: HomeScreenProps) {
+  const { habits, completions, isLoading, recordCompletion, deleteHabit } =
+    useHabits();
+  const styles = useThemedStyles(makeStyles);
+  const tokens = useTokens();
+  const now = useNow();
 
-  const [deleteTarget, setDeleteTarget] = useState<Habit | null>(null);
+  const groups = useMemo(
+    () => groupTodaysHabits(habits, completions, now),
+    [habits, completions, now],
+  );
+  const scheduledCount = SECTIONS.reduce(
+    (count, { key }) => count + groups[key].length,
+    0,
+  );
+  const completedCount = groups.completed.length;
 
-  const currentNow = new Date();
-  const todayStr = localDateToString(currentNow);
-  const today = todaysHabits(habits, currentNow);
-
-  const handleTap = useCallback(
-    async (habit: Habit) => {
-      const tapNow = new Date();
-      await recordCompletion(habit.id, localDateToString(tapNow));
-    },
-    [recordCompletion]
+  // Home lists only today's schedule; this collapsible list keeps every habit reachable.
+  const [allExpanded, setAllExpanded] = useState(false);
+  const habitsByTitle = useMemo(
+    () => [...habits].sort((a, b) => a.title.localeCompare(b.title)),
+    [habits],
   );
 
-  const startDelete = useCallback((habit: Habit) => {
-    setDeleteTarget(habit);
-  }, []);
-
-  const confirmDelete = useCallback(async () => {
-    if (!deleteTarget) return;
-    await deleteHabit(deleteTarget.id);
-    setDeleteTarget(null);
-  }, [deleteTarget, deleteHabit]);
-
-  const cancelDelete = useCallback(() => {
-    setDeleteTarget(null);
-  }, []);
-
-  const isCompletedToday = useCallback(
-    (habitId: string) => completions.some((c) => c.habitId === habitId && c.date === todayStr),
-    [completions, todayStr]
-  );
-
-  const completedCount = today.filter((h) => isCompletedToday(h.id)).length;
-
-  const currentMinutes = currentNow.getHours() * 60 + currentNow.getMinutes();
-
-  const sections = useMemo(() => {
-    const buckets: Record<HabitBucket, Habit[]> = { missed: [], due: [], upcoming: [], completed: [] };
-    for (const habit of today) {
-      const bucket = bucketFor(habit, isCompletedToday(habit.id), currentMinutes);
-      buckets[bucket].push(habit);
+  const completeHabit = async (habit: Habit) => {
+    try {
+      // Use the tap time, not the (up to 30 s old) render clock.
+      await recordCompletion(habit.id, localDateToString(new Date()));
+    } catch {
+      Alert.alert(
+        'Could not save',
+        `"${habit.title}" was not marked complete. Please try again.`,
+      );
     }
-    const byStartTime = (a: Habit, b: Habit) =>
-      minutesSinceMidnight(a.schedule.startTime) - minutesSinceMidnight(b.schedule.startTime);
-    (Object.keys(buckets) as HabitBucket[]).forEach((key) => buckets[key].sort(byStartTime));
-    return buckets;
-  }, [today, isCompletedToday, currentMinutes]);
+  };
 
-  const styles = makeStyles(tokens);
+  const confirmDelete = (habit: Habit) => {
+    Alert.alert(`Delete "${habit.title}"?`, 'Its history will be removed.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteHabit(habit.id);
+          } catch {
+            Alert.alert(
+              'Could not delete',
+              `"${habit.title}" was not deleted. Please try again.`,
+            );
+          }
+        },
+      },
+    ]);
+  };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Today</Text>
+      <Text style={styles.header} accessibilityRole="header">
+        Today
+      </Text>
 
-      <View style={styles.ringCard}>
-        <Text style={styles.ringLabel}>
-          {`${completedCount} of ${today.length} done`}
-        </Text>
-        {today.length > 0 && (
-          <View style={styles.progressBarContainer}>
-            <View
-              style={[
-                styles.progressBar,
-                { width: `${(completedCount / today.length) * 100}%` },
-              ]}
-            />
-          </View>
-        )}
-      </View>
-
-      {habits.length === 0 && (
-        <Text style={styles.emptyState}>
-          No habits yet. Add one to get started.
-        </Text>
-      )}
-
-      {habits.length > 0 && today.length === 0 && (
-        <Text style={styles.emptyState}>
-          Nothing scheduled today.
-        </Text>
-      )}
-
-      {onAddHabit && (
-        <Pressable onPress={onAddHabit} style={styles.addHabitButton}>
-          <Text style={styles.addHabitLabel}>Add habit</Text>
-        </Pressable>
-      )}
-
-      <ScrollView>
-        {SECTIONS.map(({ key, title }) => {
-          const items = sections[key];
-          if (items.length === 0) return null;
-
-          return (
-            <View style={styles.section} key={key}>
-              <Text style={styles.sectionTitle}>{`${title} (${items.length})`}</Text>
-              {items.map((item) => (
-                <HabitCard
-                  key={item.id}
-                  habit={item}
-                  completed={key === 'completed'}
-                  streak={calculateStreak(item, completions, currentNow)}
-                  styles={styles}
-                  onComplete={() => handleTap(item)}
-                  onDelete={() => startDelete(item)}
+      {isLoading ? (
+        <ActivityIndicator
+          style={styles.loading}
+          size="large"
+          color={tokens.textMuted}
+          accessibilityLabel="Loading habits"
+        />
+      ) : (
+        <>
+          <View style={styles.progressCard}>
+            <Text style={styles.progressLabel}>
+              {`${completedCount} of ${scheduledCount} done`}
+            </Text>
+            {scheduledCount > 0 && (
+              <View
+                style={styles.progressTrack}
+                accessibilityRole="progressbar"
+                accessibilityValue={{
+                  min: 0,
+                  max: scheduledCount,
+                  now: completedCount,
+                }}
+              >
+                <View
+                  style={[
+                    styles.progressFill,
+                    { width: `${(completedCount / scheduledCount) * 100}%` },
+                  ]}
                 />
-              ))}
-            </View>
-          );
-        })}
-      </ScrollView>
+              </View>
+            )}
+          </View>
 
-      {deleteTarget && (
-        <View style={styles.confirmOverlay}>
-          <Text style={styles.confirmPrompt}>
-            Delete "{deleteTarget.title}"?
-          </Text>
-          <Pressable onPress={confirmDelete}>
-            <Text style={styles.confirmSubmitLabel}>Delete</Text>
+          {habits.length === 0 && (
+            <Text style={styles.emptyState}>
+              No habits yet. Add one to get started.
+            </Text>
+          )}
+          {habits.length > 0 && scheduledCount === 0 && (
+            <Text style={styles.emptyState}>Nothing scheduled today.</Text>
+          )}
+
+          <Pressable
+            onPress={onAddHabit}
+            style={styles.addHabitButton}
+            accessibilityRole="button"
+          >
+            <Text style={styles.addHabitLabel}>Add habit</Text>
           </Pressable>
-          <Pressable onPress={cancelDelete}>
-            <Text style={styles.confirmCancelLabel}>Cancel</Text>
-          </Pressable>
-        </View>
+
+          <ScrollView>
+            {SECTIONS.map(({ key, title }) => {
+              const sectionHabits = groups[key];
+              if (sectionHabits.length === 0) {
+                return null;
+              }
+              return (
+                <View style={styles.section} key={key}>
+                  <Text style={styles.sectionTitle} accessibilityRole="header">
+                    {`${title} (${sectionHabits.length})`}
+                  </Text>
+                  {sectionHabits.map(habit => (
+                    <HabitCard
+                      key={habit.id}
+                      habit={habit}
+                      completed={key === 'completed'}
+                      streak={calculateStreak(habit, completions, now)}
+                      styles={styles}
+                      onComplete={() => completeHabit(habit)}
+                      onEdit={() => onEditHabit(habit)}
+                      onDelete={() => confirmDelete(habit)}
+                    />
+                  ))}
+                </View>
+              );
+            })}
+            {habits.length > 0 && (
+              <View style={styles.section}>
+                <Pressable
+                  onPress={() => setAllExpanded(expanded => !expanded)}
+                  style={styles.allHabitsToggle}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="All habits"
+                  accessibilityState={{ expanded: allExpanded }}
+                >
+                  <Icon
+                    kind={allExpanded ? 'minus' : 'plus'}
+                    color={tokens.textMuted}
+                    size={14}
+                  />
+                  <Text style={[styles.sectionTitle, styles.allHabitsLabel]}>
+                    {`All habits (${habits.length})`}
+                  </Text>
+                </Pressable>
+                {allExpanded &&
+                  habitsByTitle.map(habit => (
+                    <AllHabitsRow
+                      key={habit.id}
+                      habit={habit}
+                      styles={styles}
+                      onEdit={() => onEditHabit(habit)}
+                      onDelete={() => confirmDelete(habit)}
+                    />
+                  ))}
+              </View>
+            )}
+          </ScrollView>
+        </>
       )}
     </View>
   );
@@ -199,59 +216,188 @@ function HabitCard({
   streak,
   styles,
   onComplete,
+  onEdit,
   onDelete,
 }: {
   habit: Habit;
   completed: boolean;
   streak: number;
-  styles: ReturnType<typeof makeStyles>;
+  styles: Styles;
   onComplete: () => void;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
-  const metaParts = [
+  const { schedule, target } = habit;
+  const notes = habit.notes.trim();
+  const meta = [
     completed ? 'Completed today' : `${streak}-day streak`,
-    formatTimeRange(habit),
-    formatTarget(habit),
-  ].filter((part): part is string => Boolean(part));
+    `${formatClockTime(schedule.startTime)} - ${formatClockTime(
+      schedule.endTime,
+    )}`,
+    target && `Target: ${target.amount} ${target.unit}`,
+  ]
+    .filter(Boolean)
+    .join(' • ');
 
   return (
     <View style={styles.habitCard}>
       <View style={styles.habitInfo}>
-        <Text style={styles.habitTitle}>{habit.title}</Text>
-        <Text style={styles.habitMeta}>{metaParts.join(' • ')}</Text>
+        <Text style={styles.habitTitle} numberOfLines={2}>
+          {habit.title}
+        </Text>
+        {notes !== '' && (
+          <Text style={styles.habitNotes} numberOfLines={3}>
+            {notes}
+          </Text>
+        )}
+        <Text style={styles.habitMeta}>{meta}</Text>
       </View>
       <View style={styles.habitActions}>
         <Pressable
           onPress={onComplete}
+          disabled={completed}
           accessibilityRole="checkbox"
-          accessibilityState={{ checked: completed }}
-          style={[styles.completeButton, completed && styles.completeButtonActive]}
+          accessibilityState={{ checked: completed, disabled: completed }}
+          accessibilityLabel={`Complete ${habit.title}`}
+          style={[
+            styles.completeButton,
+            completed && styles.completeButtonDone,
+          ]}
         >
-          <Text style={[styles.completeButtonText, completed && styles.completeButtonTextActive]}>
+          <Text
+            style={[
+              styles.completeButtonLabel,
+              completed && styles.completeButtonLabelDone,
+            ]}
+          >
             {completed ? '✓' : 'Complete'}
           </Text>
         </Pressable>
         <Pressable
+          onPress={onEdit}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit ${habit.title}`}
+        >
+          <Text style={styles.secondaryActionLabel}>Edit</Text>
+        </Pressable>
+        <Pressable
           onPress={onDelete}
+          hitSlop={8}
+          accessibilityRole="button"
           accessibilityLabel={`Delete ${habit.title}`}
         >
-          <Text style={styles.deleteLabel}>Delete</Text>
+          <Text style={styles.secondaryActionLabel}>Delete</Text>
         </Pressable>
       </View>
     </View>
   );
 }
 
-function makeStyles(tokens: ReturnType<typeof getTokens>) {
+function AllHabitsRow({
+  habit,
+  styles,
+  onEdit,
+  onDelete,
+}: {
+  habit: Habit;
+  styles: Styles;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { schedule, target } = habit;
+  const meta = [
+    describeSchedule(habit),
+    `${formatClockTime(schedule.startTime)} - ${formatClockTime(
+      schedule.endTime,
+    )}`,
+    target && `Target: ${target.amount} ${target.unit}`,
+  ]
+    .filter(Boolean)
+    .join(' • ');
+
+  return (
+    <View style={styles.allHabitsRow}>
+      <View style={styles.habitInfo}>
+        <Text style={styles.habitTitle} numberOfLines={2}>
+          {habit.title}
+        </Text>
+        <Text style={styles.habitMeta}>{meta}</Text>
+      </View>
+      <View style={styles.habitActions}>
+        <Pressable
+          onPress={onEdit}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit ${habit.title}`}
+        >
+          <Text style={styles.secondaryActionLabel}>Edit</Text>
+        </Pressable>
+        <Pressable
+          onPress={onDelete}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`Delete ${habit.title}`}
+        >
+          <Text style={styles.secondaryActionLabel}>Delete</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function makeStyles(tokens: Tokens) {
   return StyleSheet.create({
-    container: { flex: 1, backgroundColor: tokens.background, paddingHorizontal: tokens.space6 },
-    header: { fontSize: 24, fontWeight: '600', color: tokens.text, marginTop: tokens.space6, marginBottom: tokens.space6 },
-    ringCard: { backgroundColor: tokens.surface, borderColor: tokens.border, borderWidth: 1, borderRadius: tokens.radiusLg, padding: tokens.space8, marginBottom: tokens.space8 },
-    ringLabel: { fontSize: 15, fontWeight: '600', color: tokens.text, marginBottom: tokens.space3 },
-    progressBarContainer: { height: 8, backgroundColor: tokens.border, borderRadius: 4, overflow: 'hidden' },
-    progressBar: { height: '100%', backgroundColor: '#2D8659', borderRadius: 4 },
-    emptyState: { fontSize: 14, color: tokens.textMuted, textAlign: 'center', marginBottom: tokens.space4 },
-    addHabitButton: { backgroundColor: tokens.primary, borderRadius: tokens.radiusMd, paddingVertical: tokens.space3, alignItems: 'center', marginBottom: tokens.space4 },
+    container: {
+      flex: 1,
+      backgroundColor: tokens.background,
+      paddingHorizontal: tokens.space6,
+    },
+    header: {
+      fontSize: 24,
+      fontWeight: '600',
+      color: tokens.text,
+      marginVertical: tokens.space6,
+    },
+    loading: { marginTop: tokens.space8 },
+    progressCard: {
+      backgroundColor: tokens.surface,
+      borderColor: tokens.border,
+      borderWidth: 1,
+      borderRadius: tokens.radiusLg,
+      padding: tokens.space8,
+      marginBottom: tokens.space8,
+    },
+    progressLabel: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: tokens.text,
+      marginBottom: tokens.space3,
+    },
+    progressTrack: {
+      height: 8,
+      backgroundColor: tokens.border,
+      borderRadius: 4,
+      overflow: 'hidden',
+    },
+    progressFill: {
+      height: '100%',
+      backgroundColor: tokens.success,
+      borderRadius: 4,
+    },
+    emptyState: {
+      fontSize: 14,
+      color: tokens.textMuted,
+      textAlign: 'center',
+      marginBottom: tokens.space4,
+    },
+    addHabitButton: {
+      backgroundColor: tokens.primary,
+      borderRadius: tokens.radiusMd,
+      paddingVertical: tokens.space3,
+      alignItems: 'center',
+      marginBottom: tokens.space4,
+    },
     addHabitLabel: { color: tokens.onPrimary, fontSize: 14, fontWeight: '600' },
     section: { marginBottom: tokens.space6 },
     sectionTitle: {
@@ -262,19 +408,59 @@ function makeStyles(tokens: ReturnType<typeof getTokens>) {
       textTransform: 'uppercase',
       letterSpacing: 0.5,
     },
-    habitCard: { backgroundColor: tokens.surface, borderColor: tokens.border, borderWidth: 1, borderRadius: tokens.radiusLg, padding: tokens.space6, marginBottom: tokens.space3, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    habitCard: {
+      backgroundColor: tokens.surface,
+      borderColor: tokens.border,
+      borderWidth: 1,
+      borderRadius: tokens.radiusLg,
+      padding: tokens.space6,
+      marginBottom: tokens.space3,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
     habitInfo: { flex: 1, marginRight: tokens.space4 },
     habitTitle: { fontSize: 15, fontWeight: '600', color: tokens.text },
-    habitMeta: { fontSize: 13, color: tokens.textMuted, marginTop: 4 },
-    habitActions: { flexDirection: 'row', gap: tokens.space3, alignItems: 'center' },
-    completeButton: { backgroundColor: tokens.primary, borderRadius: tokens.radiusMd, paddingHorizontal: tokens.space3, paddingVertical: tokens.space2 },
-    completeButtonActive: { backgroundColor: '#2D8659' },
-    completeButtonText: { fontSize: 12, color: tokens.onPrimary, fontWeight: '600' },
-    completeButtonTextActive: { color: '#FFFFFF' },
-    deleteLabel: { fontSize: 13, color: tokens.textMuted },
-    confirmOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: tokens.primary, padding: tokens.space6, justifyContent: 'center' },
-    confirmPrompt: { color: tokens.onPrimary, fontSize: 15, marginBottom: tokens.space3 },
-    confirmSubmitLabel: { color: tokens.onPrimary, fontSize: 15, fontWeight: '600', marginTop: tokens.space4 },
-    confirmCancelLabel: { color: tokens.onPrimary, fontSize: 13, marginTop: tokens.space3, opacity: 0.7 },
+    habitNotes: { fontSize: 13, color: tokens.text, marginTop: tokens.space1 },
+    habitMeta: {
+      fontSize: 13,
+      color: tokens.textMuted,
+      marginTop: tokens.space1,
+    },
+    habitActions: {
+      flexDirection: 'row',
+      gap: tokens.space3,
+      alignItems: 'center',
+    },
+    completeButton: {
+      backgroundColor: tokens.primary,
+      borderRadius: tokens.radiusMd,
+      paddingHorizontal: tokens.space3,
+      paddingVertical: tokens.space2,
+    },
+    completeButtonDone: { backgroundColor: tokens.success },
+    completeButtonLabel: {
+      fontSize: 12,
+      color: tokens.onPrimary,
+      fontWeight: '600',
+    },
+    completeButtonLabelDone: { color: tokens.onSuccess },
+    secondaryActionLabel: { fontSize: 13, color: tokens.textMuted },
+    allHabitsToggle: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-start',
+      gap: tokens.space2,
+      paddingVertical: tokens.space2,
+    },
+    allHabitsLabel: { marginBottom: 0 },
+    allHabitsRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: tokens.space3,
+      borderBottomColor: tokens.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+    },
   });
 }
