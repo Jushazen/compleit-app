@@ -106,3 +106,23 @@ export async function getCompletions(): Promise<HabitCompletion[]> {
 export function setCompletions(completions: HabitCompletion[]): Promise<void> {
   return writeDomain('completions', completions);
 }
+
+/** One-time UI flags (e.g. prompts already shown), kept apart from settings. */
+interface Flags {
+  exactAlarmPrompted?: boolean;
+}
+
+async function getFlags(): Promise<Flags> {
+  const value = await readDomain<unknown>('flags', null);
+  return typeof value === 'object' && value !== null ? (value as Flags) : {};
+}
+
+/** Whether the exact-alarm (on-time reminders) prompt was already shown. */
+export async function getExactAlarmPrompted(): Promise<boolean> {
+  return (await getFlags()).exactAlarmPrompted === true;
+}
+
+export async function setExactAlarmPrompted(): Promise<void> {
+  const flags = await getFlags();
+  await writeDomain<Flags>('flags', { ...flags, exactAlarmPrompted: true });
+}

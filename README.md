@@ -67,6 +67,49 @@ You've successfully run and modified your React Native App. :partying_face:
 - If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
 - If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
 
+# Release build (Google Play)
+
+Release bundles are signed with your private **upload key**, never the debug key. If the key is not configured, `npm run build:release` fails with a message pointing here.
+
+1. Create the upload key once, **outside the repository** (for example in a password manager vault or an encrypted folder):
+
+   ```sh
+   keytool -genkeypair -v -storetype PKCS12 -keystore compleit-upload.keystore -alias compleit-upload -keyalg RSA -keysize 2048 -validity 10000
+   ```
+
+   Back up the keystore and its passwords. If you lose them you cannot update the app, unless Play App Signing resets the upload key through Google Play support. Enable **Play App Signing** when you create the app in the Play Console.
+
+2. Give Gradle the credentials, either with environment variables (these win) ...
+
+   ```sh
+   # PowerShell: $env:COMPLEIT_UPLOAD_STORE_FILE = 'C:\keys\compleit-upload.keystore'
+   export COMPLEIT_UPLOAD_STORE_FILE=/path/to/compleit-upload.keystore
+   export COMPLEIT_UPLOAD_STORE_PASSWORD=...
+   export COMPLEIT_UPLOAD_KEY_ALIAS=compleit-upload
+   export COMPLEIT_UPLOAD_KEY_PASSWORD=...
+   ```
+
+   ... or with a git-ignored `android/keystore.properties` (`storeFile` may be absolute or relative to `android/`):
+
+   ```properties
+   storeFile=C:/keys/compleit-upload.keystore
+   storePassword=...
+   keyAlias=compleit-upload
+   keyPassword=...
+   ```
+
+   Never commit the keystore or these passwords.
+
+3. Build the bundle:
+
+   ```sh
+   npm run build:release
+   ```
+
+   The signed bundle is `android/app/build/outputs/bundle/release/app-release.aab`. Upload it in the Play Console.
+
+4. For every upload, increase `versionCode` (and update `versionName`) in `android/app/build.gradle`; Play rejects a `versionCode` it has already seen.
+
 # Troubleshooting
 
 If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.

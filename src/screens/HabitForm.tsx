@@ -91,7 +91,7 @@ type HabitFormProps = {
 };
 
 export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
-  const { addHabit, updateHabit } = useHabits();
+  const { habits, addHabit, updateHabit } = useHabits();
   const tokens = useTokens();
   const styles = useThemedStyles(makeStyles);
 
@@ -143,7 +143,11 @@ export function HabitFormScreen({ existingHabit, onDone }: HabitFormProps) {
     if (submittingRef.current) {
       return;
     }
-    const validationErrors = validateHabitDraft(draft);
+    const validationErrors = validateHabitDraft(
+      draft,
+      habits,
+      existingHabit?.id,
+    );
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) {
       return;

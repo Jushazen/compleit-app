@@ -1,9 +1,10 @@
-export type StorageDomain = 'habits' | 'settings' | 'completions';
+export type StorageDomain = 'habits' | 'settings' | 'completions' | 'flags';
 
 const CURRENT_VERSION: Record<StorageDomain, number> = {
   habits: 1,
   settings: 1,
   completions: 1,
+  flags: 1,
 };
 
 export function storageKey(domain: StorageDomain): string {

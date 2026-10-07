@@ -8,10 +8,17 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "android": {
-      "package": "com.compleitapp"
+      "package": "com.compleitapp",
+      "permissions": ["android.permission.SCHEDULE_EXACT_ALARM"]
     },
     "plugins": [
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-notifications",
+        {
+          "color": "#D97A42"
+        }
+      ]
     ]
   }
 }

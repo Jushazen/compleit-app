@@ -3,8 +3,9 @@
  */
 
 // Registered with plain AppRegistry (not expo's registerRootComponent) so the
-// app runs both under Expo and via `react-native run-android`, where Expo's
-// native modules are not linked. "main" matches MainActivity and Expo's default.
+// same entry works under Expo CLI and the React Native CLI (`react-native
+// start` / `run-android`). Expo modules are linked natively via
+// MainApplication. "main" matches MainActivity and Expo's default.
 import { AppRegistry } from 'react-native';
 import App from './App';
 

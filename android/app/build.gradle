@@ -72,6 +72,38 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+/**
+ * Release (Google Play upload key) signing. Each value comes from an environment
+ * variable, falling back to the git-ignored android/keystore.properties. Never commit either.
+ * See the "Release build (Google Play)" section of README.md.
+ */
+def keystoreProps = new Properties()
+def keystorePropsFile = rootProject.file('keystore.properties')
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+def uploadSetting = { String envName, String propName ->
+    def value = System.getenv(envName) ?: keystoreProps.getProperty(propName)
+    value != null && !value.trim().isEmpty() ? value.trim() : null
+}
+def uploadStoreFile = uploadSetting('COMPLEIT_UPLOAD_STORE_FILE', 'storeFile')
+def uploadStorePassword = uploadSetting('COMPLEIT_UPLOAD_STORE_PASSWORD', 'storePassword')
+def uploadKeyAlias = uploadSetting('COMPLEIT_UPLOAD_KEY_ALIAS', 'keyAlias')
+def uploadKeyPassword = uploadSetting('COMPLEIT_UPLOAD_KEY_PASSWORD', 'keyPassword')
+def hasUploadKey = uploadStoreFile && uploadStorePassword && uploadKeyAlias && uploadKeyPassword
+
+// Release builds must never fall back to the debug key: fail when a release task will run.
+// Debug builds and plain configuration (e.g. `gradlew app:tasks`) work without a key.
+gradle.taskGraph.whenReady { graph ->
+    def releaseTasks = ['validateSigningRelease', 'packageRelease', 'signReleaseBundle', 'bundleRelease', 'assembleRelease']
+    if (!hasUploadKey && graph.allTasks.any { it.project == project && releaseTasks.contains(it.name) }) {
+        throw new GradleException(
+            'Release signing is not configured. Set COMPLEIT_UPLOAD_STORE_FILE, COMPLEIT_UPLOAD_STORE_PASSWORD, ' +
+            'COMPLEIT_UPLOAD_KEY_ALIAS and COMPLEIT_UPLOAD_KEY_PASSWORD, or create android/keystore.properties ' +
+            '(storeFile, storePassword, keyAlias, keyPassword). See "Release build (Google Play)" in README.md.')
+    }
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -92,15 +124,23 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (hasUploadKey) {
+                // A relative storeFile is resolved against android/.
+                storeFile rootProject.file(uploadStoreFile)
+                storePassword uploadStorePassword
+                keyAlias uploadKeyAlias
+                keyPassword uploadKeyPassword
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // Upload key, never the debug key (see the check above and README.md).
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }

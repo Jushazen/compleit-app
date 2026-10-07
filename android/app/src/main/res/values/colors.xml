@@ -1,0 +1,4 @@
+<resources>
+    <!-- Accent tint for local notifications; mirrors the expo-notifications "color" in app.json. -->
+    <color name="notification_icon_color">#D97A42</color>
+</resources>

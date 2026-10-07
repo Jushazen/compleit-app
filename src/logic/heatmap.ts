@@ -81,14 +81,19 @@ export function buildMonthGrid(
 
 /**
  * The habits completed on `dateStr`, plus those scheduled but not completed:
- * `missed` for a day before `todayStr`, `upcoming` for today or later.
+ * `missed` before `todayStr`, `inProgress` on it, `upcoming` after it.
  */
 export function dayDetails(
   habits: Habit[],
   completions: HabitCompletion[],
   dateStr: string,
   todayStr: string,
-): { completed: Habit[]; missed: Habit[]; upcoming: Habit[] } {
+): {
+  completed: Habit[];
+  missed: Habit[];
+  inProgress: Habit[];
+  upcoming: Habit[];
+} {
   const completedIds = new Set(
     completions.filter(c => c.date === dateStr).map(c => c.habitId),
   );
@@ -97,12 +102,24 @@ export function dayDetails(
   const pending = sorted.filter(
     h => !completedIds.has(h.id) && isScheduledOn(h, dateStr),
   );
-  const isPast = compareDateStrings(dateStr, todayStr) < 0;
+  const order = compareDateStrings(dateStr, todayStr);
   return {
     completed,
-    missed: isPast ? pending : [],
-    upcoming: isPast ? [] : pending,
+    missed: order < 0 ? pending : [],
+    inProgress: order === 0 ? pending : [],
+    upcoming: order > 0 ? pending : [],
   };
+}
+
+/** The day to select after jumping to a month: today if the month contains it, else the 1st. */
+export function selectionForMonth(
+  { year, month }: YearMonth,
+  todayStr: string,
+): string {
+  const today = parseDateString(todayStr);
+  return today.year === year && today.month === month + 1
+    ? todayStr
+    : toDateString(year, month + 1, 1);
 }
 
 /** Moves a month by `delta` months, carrying across year boundaries. */

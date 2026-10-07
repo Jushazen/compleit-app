@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { MonthPicker } from '../components/MonthPicker';
 import { useHabits } from '../context/HabitContext';
 import { useNow } from '../hooks/useNow';
 import { useThemedStyles, useTokens } from '../hooks/useTheme';
@@ -14,6 +15,7 @@ import {
   countCompletionsByDate,
   dayDetails,
   intensityStep,
+  selectionForMonth,
   shiftMonth,
 } from '../logic/heatmap';
 import type { Habit } from '../storage/types';
@@ -62,6 +64,7 @@ export function HeatmapScreen() {
     return { year, month: month - 1 };
   });
   const [selectedDate, setSelectedDate] = useState(todayStr);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const grid = useMemo(
     () => buildMonthGrid(viewMonth.year, viewMonth.month),
@@ -98,6 +101,13 @@ export function HeatmapScreen() {
     setSelectedDate(delta < 0 ? lastDayOf(next) : firstDayOf(next));
   };
 
+  const handleMonthSelect = (year: number, month: number) => {
+    const next = { year, month };
+    setViewMonth(next);
+    setSelectedDate(selectionForMonth(next, todayStr));
+    setPickerOpen(false);
+  };
+
   const monthLabel = new Date(
     viewMonth.year,
     viewMonth.month,
@@ -105,6 +115,7 @@ export function HeatmapScreen() {
   ).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   const hasDetails =
     details.completed.length > 0 ||
+    details.inProgress.length > 0 ||
     details.missed.length > 0 ||
     details.upcoming.length > 0;
 
@@ -122,9 +133,16 @@ export function HeatmapScreen() {
           >
             <Text style={styles.navIcon}>‹</Text>
           </Pressable>
-          <Text style={styles.monthLabel} accessibilityRole="header">
-            {monthLabel}
-          </Text>
+          <Pressable
+            onPress={() => setPickerOpen(true)}
+            style={styles.monthButton}
+            accessibilityRole="button"
+            accessibilityLabel="Choose month"
+            accessibilityValue={{ text: monthLabel }}
+          >
+            <Text style={styles.monthLabel}>{monthLabel}</Text>
+            <Text style={styles.monthCaret}>▾</Text>
+          </Pressable>
           <Pressable
             onPress={() => goToMonth(1)}
             style={styles.navButton}
@@ -193,6 +211,11 @@ export function HeatmapScreen() {
           habits={details.completed}
           styles={styles}
         />
+        <DetailSection
+          title="In progress"
+          habits={details.inProgress}
+          styles={styles}
+        />
         <DetailSection title="Missed" habits={details.missed} styles={styles} />
         <DetailSection
           title="Upcoming"
@@ -207,6 +230,14 @@ export function HeatmapScreen() {
           </View>
         )}
       </ScrollView>
+
+      <MonthPicker
+        visible={pickerOpen}
+        year={viewMonth.year}
+        month={viewMonth.month}
+        onSelect={handleMonthSelect}
+        onClose={() => setPickerOpen(false)}
+      />
     </View>
   );
 }
@@ -281,12 +312,23 @@ function makeStyles(tokens: Tokens) {
       color: tokens.text,
       lineHeight: 22,
     },
-    monthLabel: {
+    monthButton: {
       flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: tokens.space1,
+      minHeight: 44,
+      marginHorizontal: tokens.space2,
+    },
+    monthLabel: {
       fontSize: 16,
       fontWeight: '600',
       color: tokens.text,
-      textAlign: 'center',
+    },
+    monthCaret: {
+      fontSize: 12,
+      color: tokens.textMuted,
     },
     weekdayRow: {
       flexDirection: 'row',

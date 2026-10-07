@@ -30,14 +30,31 @@ export function draftFromHabit(habit: Habit): HabitDraft {
   };
 }
 
-/** A user-facing message per invalid field; an empty object means the draft is valid. */
+/** Case- and spacing-insensitive form of a title, used to detect duplicates. */
+function normalizeTitle(title: string): string {
+  return title.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+}
+
+/**
+ * A user-facing message per invalid field; an empty object means the draft is valid.
+ * `editingId` names the habit being edited, which may keep its own title.
+ */
 export function validateHabitDraft(
   draft: HabitDraft,
+  existingHabits: Habit[] = [],
+  editingId?: string,
 ): Partial<Record<DraftField, string>> {
   const errors: Partial<Record<DraftField, string>> = {};
 
-  if (!draft.title.trim()) {
+  const title = normalizeTitle(draft.title);
+  if (!title) {
     errors.title = 'Enter a title.';
+  } else if (
+    existingHabits.some(
+      habit => habit.id !== editingId && normalizeTitle(habit.title) === title,
+    )
+  ) {
+    errors.title = 'A habit with this name already exists.';
   }
   if (draft.repeat === 'custom' && draft.days.length === 0) {
     errors.days = 'Pick at least one day.';
